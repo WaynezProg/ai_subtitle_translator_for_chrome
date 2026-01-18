@@ -43,6 +43,8 @@ coverage/
 # Tool-specific
 .claude/
 .opencode/
- .specify/
+.specify/
+
 # Specs (development planning docs)
 specs/
+openspec/
