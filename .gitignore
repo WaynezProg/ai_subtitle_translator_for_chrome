@@ -44,6 +44,7 @@ coverage/
 .claude/
 .opencode/
 .specify/
+.opencode/
 
 # Specs (development planning docs)
 specs/
