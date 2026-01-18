@@ -1,0 +1,244 @@
+/**
+ * JSON3 Parser Tests (YouTube format)
+ */
+
+import { describe, it, expect } from 'vitest';
+import {
+  parseJSON3,
+  isValidJSON3,
+  isJSON3Format,
+  JSON3ParseError
+} from '../../../src/shared/parsers/json3-parser';
+
+describe('JSON3 Parser', () => {
+  describe('parseJSON3', () => {
+    it('should parse basic JSON3 format', () => {
+      const json = JSON.stringify({
+        events: [
+          {
+            tStartMs: 1000,
+            dDurationMs: 3000,
+            segs: [{ utf8: 'Hello World' }]
+          },
+          {
+            tStartMs: 5000,
+            dDurationMs: 3000,
+            segs: [{ utf8: 'Second cue' }]
+          }
+        ]
+      });
+
+      const result = parseJSON3(json);
+      expect(result.cues).toHaveLength(2);
+      expect(result.cues[0]).toEqual({
+        index: 0,
+        startTime: 1000,
+        endTime: 4000,
+        text: 'Hello World'
+      });
+    });
+
+    it('should combine multiple segments', () => {
+      const json = JSON.stringify({
+        events: [
+          {
+            tStartMs: 1000,
+            dDurationMs: 3000,
+            segs: [
+              { utf8: 'Hello ' },
+              { utf8: 'World' }
+            ]
+          }
+        ]
+      });
+
+      const result = parseJSON3(json);
+      expect(result.cues[0].text).toBe('Hello World');
+    });
+
+    it('should handle newline characters', () => {
+      const json = JSON.stringify({
+        events: [
+          {
+            tStartMs: 1000,
+            dDurationMs: 3000,
+            segs: [
+              { utf8: 'Line one' },
+              { utf8: '\n' },
+              { utf8: 'Line two' }
+            ]
+          }
+        ]
+      });
+
+      const result = parseJSON3(json);
+      expect(result.cues[0].text).toBe('Line one\nLine two');
+    });
+
+    it('should skip events without segments', () => {
+      const json = JSON.stringify({
+        events: [
+          {
+            tStartMs: 1000,
+            dDurationMs: 3000
+            // No segs
+          },
+          {
+            tStartMs: 5000,
+            dDurationMs: 3000,
+            segs: [{ utf8: 'Has text' }]
+          }
+        ]
+      });
+
+      const result = parseJSON3(json);
+      expect(result.cues).toHaveLength(1);
+      expect(result.cues[0].text).toBe('Has text');
+    });
+
+    it('should skip events without timing', () => {
+      const json = JSON.stringify({
+        events: [
+          {
+            segs: [{ utf8: 'No timing' }]
+          },
+          {
+            tStartMs: 1000,
+            dDurationMs: 3000,
+            segs: [{ utf8: 'Has timing' }]
+          }
+        ]
+      });
+
+      const result = parseJSON3(json);
+      expect(result.cues).toHaveLength(1);
+      expect(result.cues[0].text).toBe('Has timing');
+    });
+
+    it('should skip empty text segments', () => {
+      const json = JSON.stringify({
+        events: [
+          {
+            tStartMs: 1000,
+            dDurationMs: 3000,
+            segs: [{ utf8: '   ' }]
+          },
+          {
+            tStartMs: 5000,
+            dDurationMs: 3000,
+            segs: [{ utf8: 'Has text' }]
+          }
+        ]
+      });
+
+      const result = parseJSON3(json);
+      expect(result.cues).toHaveLength(1);
+    });
+
+    it('should merge duplicate consecutive cues', () => {
+      const json = JSON.stringify({
+        events: [
+          {
+            tStartMs: 1000,
+            dDurationMs: 500,
+            segs: [{ utf8: 'Hello' }]
+          },
+          {
+            tStartMs: 1500,
+            dDurationMs: 500,
+            segs: [{ utf8: 'Hello' }]
+          },
+          {
+            tStartMs: 2000,
+            dDurationMs: 1000,
+            segs: [{ utf8: 'Hello' }]
+          }
+        ]
+      });
+
+      const result = parseJSON3(json);
+      // Should merge into a single cue
+      expect(result.cues).toHaveLength(1);
+      expect(result.cues[0].startTime).toBe(1000);
+      expect(result.cues[0].endTime).toBe(3000);
+    });
+
+    it('should use default duration if not specified', () => {
+      const json = JSON.stringify({
+        events: [
+          {
+            tStartMs: 1000,
+            // No dDurationMs
+            segs: [{ utf8: 'Hello' }]
+          }
+        ]
+      });
+
+      const result = parseJSON3(json);
+      expect(result.cues[0].endTime).toBe(6000); // 1000 + 5000 default
+    });
+
+    it('should report metadata', () => {
+      const json = JSON.stringify({
+        events: [
+          {
+            tStartMs: 1000,
+            dDurationMs: 3000,
+            segs: [{ utf8: 'Hello' }]
+          },
+          {
+            tStartMs: 5000,
+            dDurationMs: 3000,
+            segs: [{ utf8: 'World' }]
+          }
+        ],
+        pens: [{}]
+      });
+
+      const result = parseJSON3(json);
+      expect(result.metadata.eventCount).toBe(2);
+      expect(result.metadata.isAutoGenerated).toBe(true);
+    });
+
+    it('should throw on invalid JSON', () => {
+      expect(() => parseJSON3('not json')).toThrow(JSON3ParseError);
+    });
+
+    it('should throw on missing events array', () => {
+      expect(() => parseJSON3('{}')).toThrow(JSON3ParseError);
+      expect(() => parseJSON3('{"events": "not array"}')).toThrow(JSON3ParseError);
+    });
+  });
+
+  describe('isValidJSON3', () => {
+    it('should return true for valid JSON3', () => {
+      const json = JSON.stringify({
+        events: [
+          {
+            tStartMs: 1000,
+            dDurationMs: 3000,
+            segs: [{ utf8: 'Hello' }]
+          }
+        ]
+      });
+      expect(isValidJSON3(json)).toBe(true);
+    });
+
+    it('should return false for invalid content', () => {
+      expect(isValidJSON3('invalid')).toBe(false);
+      expect(isValidJSON3('{}')).toBe(false);
+    });
+  });
+
+  describe('isJSON3Format', () => {
+    it('should return true for JSON with events array', () => {
+      expect(isJSON3Format('{"events": []}')).toBe(true);
+      expect(isJSON3Format('{"events": [{}]}')).toBe(true);
+    });
+
+    it('should return false for non-JSON3 content', () => {
+      expect(isJSON3Format('not json')).toBe(false);
+      expect(isJSON3Format('{"other": "data"}')).toBe(false);
+    });
+  });
+});

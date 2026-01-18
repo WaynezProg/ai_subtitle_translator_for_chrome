@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI 字幕翻譯 - 設定</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <div id="options-root">
+    <header class="options-header">
+      <h1>AI 字幕翻譯設定</h1>
+    </header>
+    <main class="options-content">
+      <section id="provider-section" class="options-section">
+        <h2>翻譯服務</h2>
+        <div class="provider-selector">
+          <label>
+            <input type="radio" name="provider" value="claude-subscription">
+            Claude Pro (訂閱帳號)
+          </label>
+          <label>
+            <input type="radio" name="provider" value="chatgpt-subscription">
+            ChatGPT Plus (訂閱帳號)
+          </label>
+          <label>
+            <input type="radio" name="provider" value="claude-api">
+            Claude API
+          </label>
+          <label>
+            <input type="radio" name="provider" value="openai-api">
+            OpenAI API
+          </label>
+          <label>
+            <input type="radio" name="provider" value="ollama">
+            Ollama (本地)
+          </label>
+        </div>
+      </section>
+
+      <section id="api-key-section" class="options-section hidden">
+        <h2 id="api-key-title">API 設定</h2>
+        <div class="form-group">
+          <label for="api-key">API Key</label>
+          <div class="api-key-input-group">
+            <input type="password" id="api-key" placeholder="輸入 API Key" autocomplete="off">
+            <button id="toggle-key-visibility" class="btn btn-icon" type="button">顯示</button>
+          </div>
+          <span id="key-status" class="key-status"></span>
+        </div>
+        <div class="form-group">
+          <label for="model-select">模型</label>
+          <select id="model-select">
+            <option value="">請選擇模型</option>
+          </select>
+        </div>
+        <div class="api-key-actions">
+          <button id="validate-key" class="btn btn-secondary">驗證</button>
+          <button id="save-api-key" class="btn btn-primary">儲存</button>
+          <button id="clear-api-key" class="btn btn-danger">清除</button>
+        </div>
+      </section>
+
+      <section id="ollama-section" class="options-section hidden">
+        <h2>Ollama 設定</h2>
+        <div class="form-group">
+          <label for="ollama-endpoint">端點 URL</label>
+          <input type="text" id="ollama-endpoint" placeholder="http://localhost:11434">
+          <button id="test-ollama" class="btn">測試連線</button>
+        </div>
+        <div class="form-group">
+          <label for="ollama-model">模型</label>
+          <select id="ollama-model">
+            <option value="">請選擇模型</option>
+          </select>
+        </div>
+      </section>
+
+      <section id="preferences-section" class="options-section">
+        <h2>字幕偏好</h2>
+        <div class="form-group">
+          <label for="target-language">目標語言</label>
+          <select id="target-language">
+            <option value="zh-TW">繁體中文</option>
+            <option value="zh-CN">簡體中文</option>
+            <option value="en">English</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="font-size">字體大小</label>
+          <input type="range" id="font-size" min="12" max="32" value="18">
+          <span id="font-size-value">18px</span>
+        </div>
+        <div class="form-group">
+          <label for="subtitle-position">字幕位置</label>
+          <select id="subtitle-position">
+            <option value="bottom">底部</option>
+            <option value="top">頂部</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>
+            <input type="checkbox" id="bilingual-mode">
+            雙語模式
+          </label>
+        </div>
+      </section>
+
+      <section id="cache-section" class="options-section">
+        <h2>快取管理</h2>
+        <div id="cache-stats" class="cache-stats">
+          <div class="stat-item">
+            <span class="stat-label">已快取</span>
+            <span id="cache-count" class="stat-value">0 筆翻譯</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">使用空間</span>
+            <span id="cache-size" class="stat-value">0 B</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">命中率</span>
+            <span id="cache-hit-rate" class="stat-value">0%</span>
+          </div>
+        </div>
+        <div class="cache-actions">
+          <button id="refresh-cache-stats" class="btn btn-secondary">重新整理</button>
+          <button id="clear-cache" class="btn btn-danger">清除所有快取</button>
+        </div>
+        <div id="cache-entries" class="cache-entries">
+          <h3>快取列表</h3>
+          <div id="cache-entries-list" class="cache-entries-list">
+            <div class="empty-state">載入中...</div>
+          </div>
+        </div>
+      </section>
+
+      <div class="actions">
+        <button id="save-settings" class="btn btn-primary">儲存設定</button>
+      </div>
+    </main>
+  </div>
+  <script src="options.js"></script>
+</body>
+</html>

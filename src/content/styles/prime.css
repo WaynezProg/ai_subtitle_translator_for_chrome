@@ -1,0 +1,209 @@
+/**
+ * Prime Video-specific Subtitle Styles
+ * 
+ * Matches Prime Video's native subtitle styling for a seamless experience.
+ * 
+ * @see T120: Implement Prime Video-specific UI styling
+ */
+
+/* Subtitle overlay container */
+.prime-subtitle-overlay {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 15%;
+  z-index: 100000;
+  text-align: center;
+  pointer-events: none;
+  font-family: "Amazon Ember", Arial, Helvetica, sans-serif;
+}
+
+/* Position variants */
+.prime-subtitle-overlay.position-top {
+  top: 8%;
+  bottom: auto;
+}
+
+.prime-subtitle-overlay.position-bottom {
+  bottom: 15%;
+  top: auto;
+}
+
+/* Subtitle text styling - Prime uses background box style by default */
+.prime-subtitle-overlay .subtitle-text {
+  display: inline-block;
+  padding: 6px 14px;
+  font-size: 2.2vw;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.7);
+  border-radius: 2px;
+  max-width: 80%;
+  line-height: 1.4;
+  font-weight: 400;
+}
+
+/* Bilingual mode */
+.prime-subtitle-overlay .subtitle-text.bilingual {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.prime-subtitle-overlay .subtitle-text .translated {
+  font-size: 2.2vw;
+  font-weight: 500;
+}
+
+.prime-subtitle-overlay .subtitle-text .original {
+  font-size: 1.8vw;
+  opacity: 0.8;
+  font-weight: 400;
+}
+
+/* Background style variants */
+.prime-subtitle-overlay.bg-none .subtitle-text {
+  background: transparent;
+  text-shadow: 
+    2px 2px 4px rgba(0, 0, 0, 0.9),
+    -1px -1px 2px rgba(0, 0, 0, 0.5);
+}
+
+.prime-subtitle-overlay.bg-shadow .subtitle-text {
+  background: transparent;
+  text-shadow: 
+    2px 2px 4px rgba(0, 0, 0, 0.9),
+    -1px -1px 2px rgba(0, 0, 0, 0.5),
+    0 0 6px rgba(0, 0, 0, 0.7);
+}
+
+.prime-subtitle-overlay.bg-box .subtitle-text {
+  background: rgba(0, 0, 0, 0.7);
+  border-radius: 2px;
+  text-shadow: none;
+}
+
+/* Translate button for Prime Video player */
+.ai-subtitle-btn-container.prime {
+  position: absolute;
+  bottom: 90px;
+  right: 20px;
+  z-index: 100001;
+}
+
+.ai-subtitle-btn-container.prime #ai-subtitle-translate-btn {
+  background: rgba(0, 0, 0, 0.6);
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  color: #fff;
+  width: 42px;
+  height: 42px;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+}
+
+.ai-subtitle-btn-container.prime #ai-subtitle-translate-btn:hover {
+  background: rgba(0, 168, 225, 0.8);
+  border-color: #00a8e1;
+}
+
+.ai-subtitle-btn-container.prime #ai-subtitle-translate-btn:active {
+  transform: scale(0.95);
+}
+
+/* States - Prime Video brand colors */
+.ai-subtitle-btn-container.prime #ai-subtitle-translate-btn[data-state="translating"] {
+  animation: prime-pulse 1.5s infinite;
+  border-color: #00a8e1;
+}
+
+.ai-subtitle-btn-container.prime #ai-subtitle-translate-btn[data-state="complete"],
+.ai-subtitle-btn-container.prime #ai-subtitle-translate-btn[data-state="cached"] {
+  color: #00c853;
+  border-color: #00c853;
+}
+
+.ai-subtitle-btn-container.prime #ai-subtitle-translate-btn[data-state="error"] {
+  color: #ff5252;
+  border-color: #ff5252;
+}
+
+.ai-subtitle-btn-container.prime #ai-subtitle-translate-btn[data-state="local"] {
+  color: #b39ddb;
+  border-color: #b39ddb;
+}
+
+@keyframes prime-pulse {
+  0%, 100% { 
+    opacity: 1;
+    border-color: #00a8e1;
+  }
+  50% { 
+    opacity: 0.5;
+    border-color: #4dd0e1;
+  }
+}
+
+/* Progress bar */
+.ai-subtitle-btn-container.prime .btn-progress {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.ai-subtitle-btn-container.prime .btn-progress-bar {
+  background: #00a8e1;
+}
+
+/* Responsive sizing */
+@media (max-width: 768px) {
+  .prime-subtitle-overlay .subtitle-text {
+    font-size: 3.2vw;
+    padding: 4px 10px;
+  }
+  
+  .prime-subtitle-overlay .subtitle-text .translated {
+    font-size: 3.2vw;
+  }
+  
+  .prime-subtitle-overlay .subtitle-text .original {
+    font-size: 2.6vw;
+  }
+  
+  .ai-subtitle-btn-container.prime {
+    bottom: 70px;
+    right: 12px;
+  }
+  
+  .ai-subtitle-btn-container.prime #ai-subtitle-translate-btn {
+    width: 36px;
+    height: 36px;
+  }
+}
+
+@media (min-width: 1600px) {
+  .prime-subtitle-overlay .subtitle-text {
+    font-size: 26px;
+  }
+  
+  .prime-subtitle-overlay .subtitle-text .translated {
+    font-size: 26px;
+  }
+  
+  .prime-subtitle-overlay .subtitle-text .original {
+    font-size: 21px;
+  }
+}
+
+/* Fullscreen adjustments */
+:fullscreen .prime-subtitle-overlay,
+:-webkit-full-screen .prime-subtitle-overlay {
+  bottom: 12%;
+}
+
+:fullscreen .ai-subtitle-btn-container.prime,
+:-webkit-full-screen .ai-subtitle-btn-container.prime {
+  bottom: 110px;
+  right: 28px;
+}
+
+/* X-Ray panel compensation (Prime Video's X-Ray feature) */
+.prime-subtitle-overlay.xray-visible {
+  right: 35%;
+}

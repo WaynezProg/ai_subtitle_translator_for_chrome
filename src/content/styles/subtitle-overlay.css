@@ -1,0 +1,103 @@
+/**
+ * Subtitle Overlay Styles
+ * 
+ * Base CSS for the subtitle renderer overlay.
+ * Most styles are applied inline for dynamic updates,
+ * but these provide fallbacks and animations.
+ */
+
+/* Container base styles */
+#ai-subtitle-translator-container {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 2147483647;
+  transition: opacity 0.1s ease-in-out;
+}
+
+/* Text base styles */
+.ai-subtitle-text {
+  max-width: 90%;
+  padding: 4px 8px;
+  margin: 2px 0;
+  color: #ffffff;
+  word-wrap: break-word;
+  white-space: pre-wrap;
+}
+
+/* Original text in bilingual mode */
+.ai-subtitle-original {
+  opacity: 0.85;
+}
+
+/* Translation text in bilingual mode */
+.ai-subtitle-translation {
+  /* Primary text, full opacity */
+}
+
+/* Background style: shadow */
+.ai-subtitle-text--shadow {
+  text-shadow: 
+    -1px -1px 2px rgba(0, 0, 0, 0.9),
+    1px -1px 2px rgba(0, 0, 0, 0.9),
+    -1px 1px 2px rgba(0, 0, 0, 0.9),
+    1px 1px 2px rgba(0, 0, 0, 0.9),
+    0 0 4px rgba(0, 0, 0, 0.8);
+}
+
+/* Background style: box */
+.ai-subtitle-text--box {
+  background-color: rgba(0, 0, 0, 0.75);
+  border-radius: 4px;
+}
+
+/* Animation for subtitle transitions */
+@keyframes subtitle-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.ai-subtitle-text {
+  animation: subtitle-fade-in 0.15s ease-out;
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  .ai-subtitle-text {
+    background-color: #000000 !important;
+    color: #ffffff !important;
+    text-shadow: none !important;
+    border: 2px solid #ffffff;
+  }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  #ai-subtitle-translator-container {
+    transition: none;
+  }
+  
+  .ai-subtitle-text {
+    animation: none;
+  }
+}
+
+/* Custom properties for theming */
+:root {
+  --ai-subtitle-font-size: 18px;
+  --ai-subtitle-font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --ai-subtitle-text-color: #ffffff;
+  --ai-subtitle-bg-color: rgba(0, 0, 0, 0.75);
+  --ai-subtitle-shadow-color: rgba(0, 0, 0, 0.9);
+}

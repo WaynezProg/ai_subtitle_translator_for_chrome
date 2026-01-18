@@ -1,0 +1,205 @@
+/**
+ * Disney+-specific Subtitle Styles
+ * 
+ * Matches Disney+'s native subtitle styling for a seamless experience.
+ * 
+ * @see T117: Implement Disney+-specific UI styling
+ */
+
+/* Subtitle overlay container */
+.disney-subtitle-overlay {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 12%;
+  z-index: 100000;
+  text-align: center;
+  pointer-events: none;
+  font-family: Avenir, "Avenir Next", "Helvetica Neue", Helvetica, sans-serif;
+}
+
+/* Position variants */
+.disney-subtitle-overlay.position-top {
+  top: 8%;
+  bottom: auto;
+}
+
+.disney-subtitle-overlay.position-bottom {
+  bottom: 12%;
+  top: auto;
+}
+
+/* Subtitle text styling */
+.disney-subtitle-overlay .subtitle-text {
+  display: inline-block;
+  padding: 6px 16px;
+  font-size: 2.4vw;
+  color: #f9f9f9;
+  text-shadow: 
+    2px 2px 4px rgba(0, 0, 0, 0.9),
+    -1px -1px 2px rgba(0, 0, 0, 0.6),
+    0 0 8px rgba(0, 0, 0, 0.5);
+  max-width: 85%;
+  line-height: 1.5;
+  letter-spacing: 0.02em;
+}
+
+/* Bilingual mode */
+.disney-subtitle-overlay .subtitle-text.bilingual {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.disney-subtitle-overlay .subtitle-text .translated {
+  font-size: 2.4vw;
+  font-weight: 500;
+}
+
+.disney-subtitle-overlay .subtitle-text .original {
+  font-size: 1.9vw;
+  opacity: 0.75;
+  font-weight: 400;
+}
+
+/* Background style variants */
+.disney-subtitle-overlay.bg-none .subtitle-text {
+  background: transparent;
+}
+
+.disney-subtitle-overlay.bg-shadow .subtitle-text {
+  background: transparent;
+  text-shadow: 
+    2px 2px 4px rgba(0, 0, 0, 0.9),
+    -1px -1px 2px rgba(0, 0, 0, 0.6),
+    0 0 8px rgba(0, 0, 0, 0.5);
+}
+
+.disney-subtitle-overlay.bg-box .subtitle-text {
+  background: rgba(0, 0, 0, 0.75);
+  border-radius: 4px;
+  text-shadow: none;
+}
+
+/* Translate button for Disney+ player */
+.ai-subtitle-btn-container.disney {
+  position: absolute;
+  bottom: 80px;
+  right: 24px;
+  z-index: 100001;
+}
+
+.ai-subtitle-btn-container.disney #ai-subtitle-translate-btn {
+  background: rgba(15, 16, 21, 0.7);
+  border: 1px solid rgba(249, 249, 249, 0.2);
+  color: #f9f9f9;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  transition: all 0.2s ease;
+}
+
+.ai-subtitle-btn-container.disney #ai-subtitle-translate-btn:hover {
+  background: rgba(15, 16, 21, 0.9);
+  border-color: #f9f9f9;
+  transform: scale(1.1);
+}
+
+.ai-subtitle-btn-container.disney #ai-subtitle-translate-btn:active {
+  transform: scale(0.95);
+}
+
+/* States - Disney+ brand colors */
+.ai-subtitle-btn-container.disney #ai-subtitle-translate-btn[data-state="translating"] {
+  animation: disney-pulse 1.5s infinite;
+  border-color: #0063e5;
+}
+
+.ai-subtitle-btn-container.disney #ai-subtitle-translate-btn[data-state="complete"],
+.ai-subtitle-btn-container.disney #ai-subtitle-translate-btn[data-state="cached"] {
+  color: #2bd36a;
+  border-color: #2bd36a;
+}
+
+.ai-subtitle-btn-container.disney #ai-subtitle-translate-btn[data-state="error"] {
+  color: #ff6b6b;
+  border-color: #ff6b6b;
+}
+
+.ai-subtitle-btn-container.disney #ai-subtitle-translate-btn[data-state="local"] {
+  color: #a89cd6;
+  border-color: #a89cd6;
+}
+
+@keyframes disney-pulse {
+  0%, 100% { 
+    opacity: 1;
+    border-color: #0063e5;
+  }
+  50% { 
+    opacity: 0.6;
+    border-color: #40a0ff;
+  }
+}
+
+/* Progress bar */
+.ai-subtitle-btn-container.disney .btn-progress {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 50%;
+}
+
+.ai-subtitle-btn-container.disney .btn-progress-bar {
+  background: #0063e5;
+}
+
+/* Responsive sizing */
+@media (max-width: 768px) {
+  .disney-subtitle-overlay .subtitle-text {
+    font-size: 3.5vw;
+    padding: 4px 12px;
+  }
+  
+  .disney-subtitle-overlay .subtitle-text .translated {
+    font-size: 3.5vw;
+  }
+  
+  .disney-subtitle-overlay .subtitle-text .original {
+    font-size: 2.8vw;
+  }
+  
+  .ai-subtitle-btn-container.disney {
+    bottom: 60px;
+    right: 16px;
+  }
+  
+  .ai-subtitle-btn-container.disney #ai-subtitle-translate-btn {
+    width: 36px;
+    height: 36px;
+  }
+}
+
+@media (min-width: 1600px) {
+  .disney-subtitle-overlay .subtitle-text {
+    font-size: 28px;
+  }
+  
+  .disney-subtitle-overlay .subtitle-text .translated {
+    font-size: 28px;
+  }
+  
+  .disney-subtitle-overlay .subtitle-text .original {
+    font-size: 22px;
+  }
+}
+
+/* Fullscreen adjustments */
+:fullscreen .disney-subtitle-overlay,
+:-webkit-full-screen .disney-subtitle-overlay {
+  bottom: 10%;
+}
+
+:fullscreen .ai-subtitle-btn-container.disney,
+:-webkit-full-screen .ai-subtitle-btn-container.disney {
+  bottom: 100px;
+  right: 30px;
+}

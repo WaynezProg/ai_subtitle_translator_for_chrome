@@ -1,0 +1,174 @@
+/**
+ * Netflix-specific Subtitle Styles
+ * 
+ * Matches Netflix's native subtitle styling for a seamless experience.
+ * 
+ * @see T110: Implement Netflix-specific subtitle overlay styling
+ * @see T112: Match Netflix subtitle styling (font, shadow, position)
+ */
+
+/* Subtitle overlay container */
+.netflix-subtitle-overlay {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 10%;
+  z-index: 100000;
+  text-align: center;
+  pointer-events: none;
+  font-family: Netflix Sans, Helvetica Neue, Segoe UI, Roboto, Ubuntu, sans-serif;
+}
+
+/* Position variants */
+.netflix-subtitle-overlay.position-top {
+  top: 10%;
+  bottom: auto;
+}
+
+.netflix-subtitle-overlay.position-bottom {
+  bottom: 10%;
+  top: auto;
+}
+
+/* Subtitle text styling */
+.netflix-subtitle-overlay .subtitle-text {
+  display: inline-block;
+  padding: 4px 12px;
+  font-size: 2.5vw;
+  color: #fff;
+  text-shadow: 
+    2px 2px 4px rgba(0, 0, 0, 0.9),
+    -1px -1px 2px rgba(0, 0, 0, 0.5),
+    0 0 6px rgba(0, 0, 0, 0.7);
+  max-width: 80%;
+  line-height: 1.4;
+  letter-spacing: 0.01em;
+}
+
+/* Bilingual mode */
+.netflix-subtitle-overlay .subtitle-text.bilingual {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.netflix-subtitle-overlay .subtitle-text .translated {
+  font-size: 2.5vw;
+  font-weight: 500;
+}
+
+.netflix-subtitle-overlay .subtitle-text .original {
+  font-size: 2vw;
+  opacity: 0.75;
+  font-weight: 400;
+}
+
+/* Background style variants */
+.netflix-subtitle-overlay.bg-none .subtitle-text {
+  background: transparent;
+}
+
+.netflix-subtitle-overlay.bg-shadow .subtitle-text {
+  background: transparent;
+  text-shadow: 
+    2px 2px 4px rgba(0, 0, 0, 0.9),
+    -1px -1px 2px rgba(0, 0, 0, 0.5),
+    0 0 6px rgba(0, 0, 0, 0.7);
+}
+
+.netflix-subtitle-overlay.bg-box .subtitle-text {
+  background: rgba(0, 0, 0, 0.75);
+  border-radius: 4px;
+  text-shadow: none;
+}
+
+/* Translate button for Netflix player */
+.ai-subtitle-btn-container.netflix {
+  position: absolute;
+  bottom: 100px;
+  right: 20px;
+  z-index: 100001;
+}
+
+.ai-subtitle-btn-container.netflix #ai-subtitle-translate-btn {
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #fff;
+  width: 40px;
+  height: 40px;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+}
+
+.ai-subtitle-btn-container.netflix #ai-subtitle-translate-btn:hover {
+  background: rgba(229, 9, 20, 0.8);
+  border-color: #e50914;
+}
+
+.ai-subtitle-btn-container.netflix #ai-subtitle-translate-btn:active {
+  transform: scale(0.95);
+}
+
+/* States */
+.ai-subtitle-btn-container.netflix #ai-subtitle-translate-btn[data-state="translating"] {
+  animation: netflix-pulse 1.5s infinite;
+}
+
+.ai-subtitle-btn-container.netflix #ai-subtitle-translate-btn[data-state="complete"],
+.ai-subtitle-btn-container.netflix #ai-subtitle-translate-btn[data-state="cached"] {
+  color: #46d369;
+  border-color: #46d369;
+}
+
+.ai-subtitle-btn-container.netflix #ai-subtitle-translate-btn[data-state="error"] {
+  color: #e50914;
+  border-color: #e50914;
+}
+
+.ai-subtitle-btn-container.netflix #ai-subtitle-translate-btn[data-state="local"] {
+  color: #b4a7d6;
+  border-color: #b4a7d6;
+}
+
+@keyframes netflix-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* Progress bar */
+.ai-subtitle-btn-container.netflix .btn-progress {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.ai-subtitle-btn-container.netflix .btn-progress-bar {
+  background: #e50914;
+}
+
+/* Responsive sizing */
+@media (max-width: 800px) {
+  .netflix-subtitle-overlay .subtitle-text {
+    font-size: 3.5vw;
+  }
+  
+  .netflix-subtitle-overlay .subtitle-text .translated {
+    font-size: 3.5vw;
+  }
+  
+  .netflix-subtitle-overlay .subtitle-text .original {
+    font-size: 2.8vw;
+  }
+}
+
+@media (min-width: 1600px) {
+  .netflix-subtitle-overlay .subtitle-text {
+    font-size: 28px;
+  }
+  
+  .netflix-subtitle-overlay .subtitle-text .translated {
+    font-size: 28px;
+  }
+  
+  .netflix-subtitle-overlay .subtitle-text .original {
+    font-size: 22px;
+  }
+}
