@@ -15,25 +15,53 @@
       <section id="provider-section" class="options-section">
         <h2>翻譯服務</h2>
         <div class="provider-selector">
-          <label>
-            <input type="radio" name="provider" value="claude-subscription">
-            Claude Pro (訂閱帳號)
+          <label class="provider-option recommended">
+            <input type="radio" name="provider" value="google-translate">
+            <span class="provider-info">
+              <span class="provider-name">Google 翻譯</span>
+              <span class="provider-badge free">免費</span>
+              <span class="provider-desc">適合一般使用，無需設定</span>
+            </span>
           </label>
-          <label>
-            <input type="radio" name="provider" value="chatgpt-subscription">
-            ChatGPT Plus (訂閱帳號)
-          </label>
-          <label>
+          <label class="provider-option">
             <input type="radio" name="provider" value="claude-api">
-            Claude API
+            <span class="provider-info">
+              <span class="provider-name">Claude API</span>
+              <span class="provider-badge api">API</span>
+              <span class="provider-desc">高品質 AI 翻譯，需要 API Key</span>
+            </span>
           </label>
-          <label>
+          <label class="provider-option">
             <input type="radio" name="provider" value="openai-api">
-            OpenAI API
+            <span class="provider-info">
+              <span class="provider-name">OpenAI API</span>
+              <span class="provider-badge api">API</span>
+              <span class="provider-desc">GPT-4 翻譯，需要 API Key</span>
+            </span>
           </label>
-          <label>
+          <label class="provider-option">
             <input type="radio" name="provider" value="ollama">
-            Ollama (本地)
+            <span class="provider-info">
+              <span class="provider-name">Ollama</span>
+              <span class="provider-badge local">本地</span>
+              <span class="provider-desc">本地運行，完全免費離線使用</span>
+            </span>
+          </label>
+          <label class="provider-option">
+            <input type="radio" name="provider" value="claude-subscription">
+            <span class="provider-info">
+              <span class="provider-name">Claude Pro</span>
+              <span class="provider-badge subscription">訂閱</span>
+              <span class="provider-desc">使用現有訂閱帳號</span>
+            </span>
+          </label>
+          <label class="provider-option">
+            <input type="radio" name="provider" value="chatgpt-subscription">
+            <span class="provider-info">
+              <span class="provider-name">ChatGPT Plus</span>
+              <span class="provider-badge subscription">訂閱</span>
+              <span class="provider-desc">使用現有訂閱帳號</span>
+            </span>
           </label>
         </div>
       </section>
@@ -58,6 +86,51 @@
           <button id="validate-key" class="btn btn-secondary">驗證</button>
           <button id="save-api-key" class="btn btn-primary">儲存</button>
           <button id="clear-api-key" class="btn btn-danger">清除</button>
+        </div>
+      </section>
+
+      <section id="subscription-section" class="options-section hidden">
+        <h2 id="subscription-title">訂閱帳號設定</h2>
+        <div class="subscription-warning">
+          <span class="warning-icon">⚠️</span>
+          <div class="warning-content">
+            <strong>使用條款提醒</strong>
+            <p>此功能透過瀏覽器 Session 存取您的訂閱帳號，可能違反服務條款。請自行承擔使用風險。</p>
+          </div>
+        </div>
+        <div class="subscription-steps">
+          <h3>設定步驟</h3>
+          <ol>
+            <li>
+              <span class="step-number">1</span>
+              <div class="step-content">
+                <strong>登入服務</strong>
+                <p>請先在新分頁中登入您的帳號</p>
+                <button id="open-login-page" class="btn btn-secondary">開啟登入頁面</button>
+              </div>
+            </li>
+            <li>
+              <span class="step-number">2</span>
+              <div class="step-content">
+                <strong>驗證連線</strong>
+                <p>登入後點擊下方按鈕驗證</p>
+                <button id="verify-subscription" class="btn btn-primary">驗證訂閱狀態</button>
+              </div>
+            </li>
+          </ol>
+        </div>
+        <div id="subscription-status" class="subscription-status hidden">
+          <div class="status-icon">✅</div>
+          <div class="status-text">
+            <strong>已連線</strong>
+            <p id="subscription-account-info">帳號資訊載入中...</p>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>
+            <input type="checkbox" id="accept-tos-disclaimer">
+            我了解並接受使用此功能的風險
+          </label>
         </div>
       </section>
 

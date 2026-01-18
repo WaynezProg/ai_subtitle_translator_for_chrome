@@ -17,10 +17,12 @@ import type {
   GetCachedTranslationResponse,
   GetAuthStatusMessage,
   GetAuthStatusResponse,
+  TranslateTextMessage,
+  TranslateTextResponse,
   BackgroundToContentMessage,
   Response,
 } from '../shared/types/messages';
-import type { Platform, SubtitleFormat, Subtitle } from '../shared/types/subtitle';
+import type { Platform, SubtitleFormat, Subtitle, Cue } from '../shared/types/subtitle';
 import type { ProviderType, ProviderStatus } from '../shared/types/auth';
 
 // ============================================================================
@@ -28,27 +30,61 @@ import type { ProviderType, ProviderStatus } from '../shared/types/auth';
 // ============================================================================
 
 /**
- * Send a message to the background script and await response
+ * Send a message to the background script and await response via bridge
+ * 
+ * In MAIN world, we don't have access to chrome.runtime, so we use
+ * window.postMessage to communicate with the bridge script in ISOLATED world.
  * 
  * @throws Error if response indicates failure
  */
 async function sendMessage<TResponse extends Response>(
   message: object
 ): Promise<TResponse> {
-  const response = await chrome.runtime.sendMessage(message);
-  
-  if (!response) {
-    throw new MessageError('NO_RESPONSE', 'No response received from background script');
-  }
-  
-  if (!response.success) {
-    throw new MessageError(
-      response.error?.code ?? 'UNKNOWN_ERROR',
-      response.error?.message ?? 'Unknown error occurred'
-    );
-  }
-  
-  return response as TResponse;
+  return new Promise((resolve, reject) => {
+    const requestId = (message as { requestId?: string }).requestId || generateRequestId();
+    const messageWithId = { ...message, requestId };
+    
+    // Set up response listener
+    const handleResponse = (event: MessageEvent): void => {
+      if (event.source !== window) return;
+      if (event.data?.type !== 'AI_SUBTITLE_BRIDGE_RESPONSE') return;
+      if (event.data?.requestId !== requestId) return;
+      
+      window.removeEventListener('message', handleResponse);
+      
+      const response = event.data.response;
+      
+      if (!response) {
+        reject(new MessageError('NO_RESPONSE', 'No response received from background script'));
+        return;
+      }
+      
+      if (!response.success) {
+        reject(new MessageError(
+          response.error?.code ?? 'UNKNOWN_ERROR',
+          response.error?.message ?? 'Unknown error occurred'
+        ));
+        return;
+      }
+      
+      resolve(response as TResponse);
+    };
+    
+    window.addEventListener('message', handleResponse);
+    
+    // Send message via bridge
+    window.postMessage({
+      type: 'AI_SUBTITLE_BRIDGE_REQUEST',
+      requestId,
+      message: messageWithId,
+    }, '*');
+    
+    // Timeout after 30 seconds
+    setTimeout(() => {
+      window.removeEventListener('message', handleResponse);
+      reject(new MessageError('TIMEOUT', 'Request timed out'));
+    }, 30000);
+  });
 }
 
 // ============================================================================
@@ -80,7 +116,11 @@ export async function sendSubtitleDetected(params: {
  */
 export async function requestTranslation(params: {
   subtitleId: string;
+  videoId: string;
+  platform: Platform;
+  sourceLanguage: string;
   targetLanguage: string;
+  cues: Cue[];
   startFromIndex?: number;
 }): Promise<{ jobId: string; status: 'started' | 'queued' }> {
   const message: RequestTranslationMessage = {
@@ -143,6 +183,27 @@ export async function getAuthStatus(): Promise<{
   return response.data!;
 }
 
+/**
+ * Translate a single text string (for real-time translation)
+ */
+export async function translateText(params: {
+  text: string;
+  sourceLanguage: string;
+  targetLanguage: string;
+}): Promise<{ translatedText: string; cached: boolean }> {
+  const message: TranslateTextMessage = {
+    type: 'TRANSLATE_TEXT',
+    payload: params,
+    requestId: generateRequestId(),
+  };
+  
+  const response = await sendMessage<TranslateTextResponse>(message);
+  if (!response.success || !response.data) {
+    throw new Error(response.error?.message || 'Translation failed');
+  }
+  return response.data;
+}
+
 // ============================================================================
 // Message Listener
 // ============================================================================
@@ -187,23 +248,28 @@ export function removeAllListeners(type: string): void {
 
 /**
  * Setup the message listener for incoming messages from background
+ * 
+ * In MAIN world, we listen for window messages forwarded by the bridge script.
  */
 export function setupMessageListener(): void {
-  chrome.runtime.onMessage.addListener((message: BackgroundToContentMessage) => {
-    const messageListeners = listeners.get(message.type);
+  window.addEventListener('message', (event) => {
+    if (event.source !== window) return;
     
-    if (messageListeners) {
-      for (const listener of messageListeners) {
-        try {
-          listener(message);
-        } catch (error) {
-          console.error(`[MessageSender] Error in listener for ${message.type}:`, error);
+    // Handle messages forwarded by bridge from background
+    if (event.data?.type === 'AI_SUBTITLE_BACKGROUND_MESSAGE') {
+      const message = event.data.message as BackgroundToContentMessage;
+      const messageListeners = listeners.get(message.type);
+      
+      if (messageListeners) {
+        for (const listener of messageListeners) {
+          try {
+            listener(message);
+          } catch (error) {
+            console.error(`[MessageSender] Error in listener for ${message.type}:`, error);
+          }
         }
       }
     }
-    
-    // Return false to indicate we're not sending a response
-    return false;
   });
 }
 

@@ -24,6 +24,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Initialize UI event handlers
   initProviderSelector();
   initApiKeySection();
+  initSubscriptionSection();
   initOllamaSection();
   initFontSizeSlider();
   initSaveButton();
@@ -42,6 +43,7 @@ document.addEventListener('DOMContentLoaded', () => {
 function initProviderSelector(): void {
   const providerRadios = document.querySelectorAll('input[name="provider"]');
   const apiKeySection = document.getElementById('api-key-section');
+  const subscriptionSection = document.getElementById('subscription-section');
   const ollamaSection = document.getElementById('ollama-section');
   
   providerRadios.forEach(radio => {
@@ -51,13 +53,31 @@ function initProviderSelector(): void {
       
       // Show/hide relevant sections
       const showApiKey = value === 'claude-api' || value === 'openai-api';
+      const showSubscription = value === 'claude-subscription' || value === 'chatgpt-subscription';
+      const showOllama = value === 'ollama';
+      const showGoogleTranslate = value === 'google-translate';
+      
       apiKeySection?.classList.toggle('hidden', !showApiKey);
-      ollamaSection?.classList.toggle('hidden', value !== 'ollama');
+      subscriptionSection?.classList.toggle('hidden', !showSubscription);
+      ollamaSection?.classList.toggle('hidden', !showOllama);
+      
+      // For Google Translate, show a success message (no config needed)
+      if (showGoogleTranslate) {
+        showNotification('Google 翻譯已選擇，無需額外設定！');
+      }
       
       // Update API key section title based on provider
       const apiKeyTitle = document.getElementById('api-key-title');
       if (apiKeyTitle) {
         apiKeyTitle.textContent = value === 'claude-api' ? 'Claude API 設定' : 'OpenAI API 設定';
+      }
+      
+      // Update subscription section title based on provider
+      const subscriptionTitle = document.getElementById('subscription-title');
+      if (subscriptionTitle) {
+        subscriptionTitle.textContent = value === 'claude-subscription' 
+          ? 'Claude Pro 訂閱設定' 
+          : 'ChatGPT Plus 訂閱設定';
       }
       
       void (async (): Promise<void> => {
@@ -66,8 +86,13 @@ function initProviderSelector(): void {
           await loadApiKeyForProvider(value);
         }
         
+        // Load subscription status if selected
+        if (showSubscription) {
+          await loadSubscriptionStatus(value);
+        }
+        
         // Load Ollama config if selected
-        if (value === 'ollama') {
+        if (showOllama) {
           await loadOllamaConfig();
         }
         
@@ -107,6 +132,133 @@ function initApiKeySection(): void {
       toggleBtn.textContent = isPassword ? '隱藏' : '顯示';
     }
   });
+}
+
+function initSubscriptionSection(): void {
+  // Open login page button
+  const openLoginBtn = document.getElementById('open-login-page');
+  openLoginBtn?.addEventListener('click', () => {
+    const providerRadio = document.querySelector('input[name="provider"]:checked') as HTMLInputElement;
+    const providerType = providerRadio?.value as ProviderType;
+    
+    const loginUrls: Record<string, string> = {
+      'claude-subscription': 'https://claude.ai/login',
+      'chatgpt-subscription': 'https://chat.openai.com/auth/login',
+    };
+    
+    const url = loginUrls[providerType];
+    if (url) {
+      window.open(url, '_blank');
+    }
+  });
+  
+  // Verify subscription button
+  const verifyBtn = document.getElementById('verify-subscription');
+  verifyBtn?.addEventListener('click', () => {
+    void verifySubscription();
+  });
+  
+  // ToS disclaimer checkbox
+  const tosCheckbox = document.getElementById('accept-tos-disclaimer') as HTMLInputElement;
+  tosCheckbox?.addEventListener('change', () => {
+    void saveToSAcceptance(tosCheckbox.checked);
+  });
+}
+
+async function verifySubscription(): Promise<void> {
+  const verifyBtn = document.getElementById('verify-subscription') as HTMLButtonElement;
+  const statusEl = document.getElementById('subscription-status');
+  const accountInfoEl = document.getElementById('subscription-account-info');
+  
+  const providerRadio = document.querySelector('input[name="provider"]:checked') as HTMLInputElement;
+  const providerType = providerRadio?.value as ProviderType;
+  
+  if (!providerType) return;
+  
+  if (verifyBtn) {
+    verifyBtn.disabled = true;
+    verifyBtn.textContent = '驗證中...';
+  }
+  
+  try {
+    // Create provider and validate
+    const provider = createProviderFromConfig(providerType);
+    
+    if (!provider) {
+      throw new Error('無法建立 Provider');
+    }
+    
+    const result = await provider.validateCredentials();
+    
+    if (result.valid) {
+      statusEl?.classList.remove('hidden');
+      statusEl?.classList.add('success');
+      if (accountInfoEl) {
+        accountInfoEl.textContent = result.accountInfo?.tier || '訂閱帳號已連線';
+      }
+      showNotification('訂閱驗證成功！');
+      
+      // Save subscription status
+      await saveProviderCredentials(providerType, 'session-based', undefined);
+    } else {
+      statusEl?.classList.remove('hidden');
+      statusEl?.classList.remove('success');
+      statusEl?.classList.add('error');
+      if (accountInfoEl) {
+        accountInfoEl.textContent = result.error?.message || '驗證失敗';
+      }
+      showNotification(result.error?.message || '驗證失敗，請確認已登入', 'error');
+    }
+  } catch (error) {
+    console.error('[Options] Subscription verification error:', error);
+    statusEl?.classList.add('hidden');
+    showNotification('驗證過程發生錯誤，請確認已在瀏覽器中登入', 'error');
+  } finally {
+    if (verifyBtn) {
+      verifyBtn.disabled = false;
+      verifyBtn.textContent = '驗證訂閱狀態';
+    }
+  }
+}
+
+async function loadSubscriptionStatus(providerType: ProviderType): Promise<void> {
+  const statusEl = document.getElementById('subscription-status');
+  const accountInfoEl = document.getElementById('subscription-account-info');
+  const tosCheckbox = document.getElementById('accept-tos-disclaimer') as HTMLInputElement;
+  
+  try {
+    const authProvider = await getAuthProvider(providerType);
+    
+    if (authProvider?.status === 'valid') {
+      statusEl?.classList.remove('hidden');
+      statusEl?.classList.add('success');
+      if (accountInfoEl) {
+        accountInfoEl.textContent = authProvider.displayName || '訂閱帳號已連線';
+      }
+    } else {
+      statusEl?.classList.add('hidden');
+    }
+    
+    // Load ToS acceptance status
+    const result = await chrome.storage.local.get(['preferences']);
+    if (tosCheckbox && result.preferences?.acceptedSubscriptionDisclaimer) {
+      tosCheckbox.checked = true;
+    }
+  } catch (error) {
+    console.error('[Options] Failed to load subscription status:', error);
+    statusEl?.classList.add('hidden');
+  }
+}
+
+async function saveToSAcceptance(accepted: boolean): Promise<void> {
+  try {
+    const result = await chrome.storage.local.get(['preferences']);
+    const preferences = result.preferences || {};
+    preferences.acceptedSubscriptionDisclaimer = accepted;
+    await chrome.storage.local.set({ preferences });
+  } catch (error) {
+    console.error('[Options] Failed to save ToS acceptance:', error);
+  }
 }
 
 function initOllamaSection(): void {

@@ -79,112 +79,9 @@ const STATE_TITLES: Record<TranslateButtonState, string> = {
 };
 
 // ============================================================================
-// Styles
-// ============================================================================
-
-const COMMON_STYLES = `
-  .${CONTAINER_CLASS} {
-    display: inline-flex;
-    align-items: center;
-    position: relative;
-  }
-  
-  #${BUTTON_ID} {
-    background: transparent;
-    border: none;
-    cursor: pointer;
-    padding: 8px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.2s ease;
-    border-radius: 4px;
-    position: relative;
-  }
-  
-  #${BUTTON_ID}:hover {
-    background: rgba(255, 255, 255, 0.1);
-  }
-  
-  #${BUTTON_ID}:active {
-    transform: scale(0.95);
-  }
-  
-  #${BUTTON_ID} .btn-icon {
-    font-size: 20px;
-    line-height: 1;
-  }
-  
-  #${BUTTON_ID} .btn-progress {
-    position: absolute;
-    bottom: 2px;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 24px;
-    height: 3px;
-    background: rgba(255, 255, 255, 0.3);
-    border-radius: 2px;
-    overflow: hidden;
-  }
-  
-  #${BUTTON_ID} .btn-progress-bar {
-    height: 100%;
-    background: #4CAF50;
-    transition: width 0.3s ease;
-    border-radius: 2px;
-  }
-  
-  #${BUTTON_ID}[data-state="translating"] {
-    animation: pulse 1.5s infinite;
-  }
-  
-  #${BUTTON_ID}[data-state="error"] {
-    color: #ff4444;
-  }
-  
-  #${BUTTON_ID}[data-state="complete"],
-  #${BUTTON_ID}[data-state="cached"] {
-    color: #4CAF50;
-  }
-  
-  #${BUTTON_ID}[data-state="local"] {
-    color: #9C27B0;
-  }
-  
-  #${BUTTON_ID} .local-indicator {
-    position: absolute;
-    top: -2px;
-    right: -2px;
-    width: 8px;
-    height: 8px;
-    background: #9C27B0;
-    border-radius: 50%;
-    border: 1px solid #fff;
-  }
-  
-  @keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.5; }
-  }
-`;
-
-const YOUTUBE_STYLES = `
-  ${COMMON_STYLES}
-  
-  .${CONTAINER_CLASS} {
-    margin-left: 8px;
-  }
-  
-  #${BUTTON_ID} {
-    width: 36px;
-    height: 36px;
-    color: #fff;
-  }
-`;
-
-// ============================================================================
 // Implementation
 // ============================================================================
+// Note: CSS is loaded via manifest.json content_scripts for Trusted Types compliance
 
 export function createTranslateButton(options: TranslateButtonOptions): TranslateButton {
   const { onClick, platform } = options;
@@ -196,7 +93,7 @@ export function createTranslateButton(options: TranslateButtonOptions): Translat
   let mounted = false;
   
   /**
-   * Create button elements
+   * Create button elements using DOM APIs (no innerHTML for Trusted Types compliance)
    */
   function createElements(): { container: HTMLDivElement; button: HTMLButtonElement } {
     const container = document.createElement('div');
@@ -207,13 +104,30 @@ export function createTranslateButton(options: TranslateButtonOptions): Translat
     button.type = 'button';
     button.dataset.state = state;
     button.title = STATE_TITLES[state];
-    button.innerHTML = `
-      <span class="btn-icon">${STATE_ICONS[state]}</span>
-      <div class="btn-progress" style="display: none;">
-        <div class="btn-progress-bar" style="width: 0%;"></div>
-      </div>
-      <span class="local-indicator" style="display: none;"></span>
-    `;
+    
+    // Create icon span
+    const iconSpan = document.createElement('span');
+    iconSpan.className = 'btn-icon';
+    iconSpan.textContent = STATE_ICONS[state];
+    button.appendChild(iconSpan);
+    
+    // Create progress container
+    const progressDiv = document.createElement('div');
+    progressDiv.className = 'btn-progress';
+    progressDiv.style.display = 'none';
+    
+    const progressBar = document.createElement('div');
+    progressBar.className = 'btn-progress-bar';
+    progressBar.style.width = '0%';
+    progressDiv.appendChild(progressBar);
+    
+    button.appendChild(progressDiv);
+    
+    // Create local indicator
+    const localIndicator = document.createElement('span');
+    localIndicator.className = 'local-indicator';
+    localIndicator.style.display = 'none';
+    button.appendChild(localIndicator);
     
     button.addEventListener('click', (e) => {
       e.preventDefault();
@@ -223,19 +137,6 @@ export function createTranslateButton(options: TranslateButtonOptions): Translat
     
     container.appendChild(button);
     return { container, button };
-  }
-  
-  /**
-   * Inject styles
-   */
-  function injectStyles(): void {
-    const styleId = 'ai-subtitle-btn-styles';
-    if (document.getElementById(styleId)) return;
-    
-    const style = document.createElement('style');
-    style.id = styleId;
-    style.textContent = platform === 'youtube' ? YOUTUBE_STYLES : COMMON_STYLES;
-    document.head.appendChild(style);
   }
   
   /**
@@ -301,7 +202,7 @@ export function createTranslateButton(options: TranslateButtonOptions): Translat
     mount(): void {
       if (mounted) return;
       
-      injectStyles();
+      // CSS is loaded via manifest.json content_scripts for Trusted Types compliance
       
       const controlsContainer = findControlsContainer();
       if (!controlsContainer) {

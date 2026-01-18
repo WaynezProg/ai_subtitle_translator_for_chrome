@@ -48,133 +48,9 @@ export interface ProgressOverlay {
 const OVERLAY_ID = 'ai-subtitle-progress-overlay';
 
 // ============================================================================
-// Styles
-// ============================================================================
-
-const OVERLAY_STYLES = `
-  #${OVERLAY_ID} {
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(0, 0, 0, 0.85);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    z-index: 2147483646;
-    font-family: system-ui, -apple-system, sans-serif;
-    color: #fff;
-    animation: fadeIn 0.2s ease-out;
-  }
-  
-  @keyframes fadeIn {
-    from { opacity: 0; }
-    to { opacity: 1; }
-  }
-  
-  #${OVERLAY_ID} .progress-container {
-    text-align: center;
-    max-width: 400px;
-    padding: 24px;
-  }
-  
-  #${OVERLAY_ID} .progress-icon {
-    font-size: 48px;
-    margin-bottom: 16px;
-  }
-  
-  #${OVERLAY_ID} .progress-title {
-    font-size: 20px;
-    font-weight: 600;
-    margin-bottom: 8px;
-  }
-  
-  #${OVERLAY_ID} .progress-subtitle {
-    font-size: 14px;
-    color: rgba(255, 255, 255, 0.7);
-    margin-bottom: 24px;
-  }
-  
-  #${OVERLAY_ID} .progress-bar-container {
-    width: 100%;
-    height: 8px;
-    background: rgba(255, 255, 255, 0.2);
-    border-radius: 4px;
-    overflow: hidden;
-    margin-bottom: 12px;
-  }
-  
-  #${OVERLAY_ID} .progress-bar {
-    height: 100%;
-    background: linear-gradient(90deg, #4CAF50, #8BC34A);
-    border-radius: 4px;
-    transition: width 0.3s ease;
-  }
-  
-  #${OVERLAY_ID} .progress-stats {
-    display: flex;
-    justify-content: space-between;
-    font-size: 13px;
-    color: rgba(255, 255, 255, 0.8);
-    margin-bottom: 20px;
-  }
-  
-  #${OVERLAY_ID} .progress-time {
-    color: rgba(255, 255, 255, 0.6);
-  }
-  
-  #${OVERLAY_ID} .progress-cancel {
-    background: transparent;
-    border: 1px solid rgba(255, 255, 255, 0.3);
-    color: #fff;
-    padding: 8px 24px;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 14px;
-    transition: all 0.2s ease;
-  }
-  
-  #${OVERLAY_ID} .progress-cancel:hover {
-    background: rgba(255, 255, 255, 0.1);
-    border-color: rgba(255, 255, 255, 0.5);
-  }
-  
-  #${OVERLAY_ID}.error .progress-icon {
-    color: #ff5252;
-  }
-  
-  #${OVERLAY_ID}.complete .progress-icon {
-    color: #4CAF50;
-  }
-  
-  #${OVERLAY_ID} .error-message {
-    color: #ff8a80;
-    margin-bottom: 16px;
-  }
-  
-  #${OVERLAY_ID} .retry-button {
-    background: #4CAF50;
-    border: none;
-    color: #fff;
-    padding: 10px 28px;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 14px;
-    font-weight: 500;
-    margin-right: 12px;
-    transition: background 0.2s ease;
-  }
-  
-  #${OVERLAY_ID} .retry-button:hover {
-    background: #43A047;
-  }
-`;
-
-// ============================================================================
 // Implementation
 // ============================================================================
+// Note: CSS is loaded via manifest.json content_scripts for Trusted Types compliance
 
 export function createProgressOverlay(options: ProgressOverlayOptions = {}): ProgressOverlay {
   const { onCancel } = options;
@@ -182,19 +58,6 @@ export function createProgressOverlay(options: ProgressOverlayOptions = {}): Pro
   let overlay: HTMLDivElement | null = null;
   let visible = false;
   let currentProgress: JobProgress | null = null;
-  
-  /**
-   * Inject styles
-   */
-  function injectStyles(): void {
-    const styleId = 'ai-subtitle-progress-styles';
-    if (document.getElementById(styleId)) return;
-    
-    const style = document.createElement('style');
-    style.id = styleId;
-    style.textContent = OVERLAY_STYLES;
-    document.head.appendChild(style);
-  }
   
   /**
    * Format time remaining
@@ -239,55 +102,103 @@ export function createProgressOverlay(options: ProgressOverlayOptions = {}): Pro
       ? Math.round((progress.translatedCount / progress.totalCount) * 100)
       : 0;
     
+    // Clear existing content
+    while (el.firstChild) {
+      el.removeChild(el.firstChild);
+    }
+    
+    // Create container
+    const container = document.createElement('div');
+    container.className = 'progress-container';
+    
     if (state === 'translating') {
-      el.innerHTML = `
-        <div class="progress-container">
-          <div class="progress-icon">🌐</div>
-          <div class="progress-title">正在翻譯字幕...</div>
-          <div class="progress-subtitle">
-            區塊 ${(progress?.currentChunk ?? 0) + 1} / ${progress?.totalChunks ?? 1}
-          </div>
-          <div class="progress-bar-container">
-            <div class="progress-bar" style="width: ${percent}%"></div>
-          </div>
-          <div class="progress-stats">
-            <span>${progress?.translatedCount ?? 0} / ${progress?.totalCount ?? 0} 句</span>
-            <span class="progress-time">${formatTimeRemaining(progress?.estimatedTimeRemaining)}</span>
-          </div>
-          ${onCancel ? '<button class="progress-cancel">取消</button>' : ''}
-        </div>
-      `;
+      const icon = document.createElement('div');
+      icon.className = 'progress-icon';
+      icon.textContent = '🌐';
+      container.appendChild(icon);
+      
+      const title = document.createElement('div');
+      title.className = 'progress-title';
+      title.textContent = '正在翻譯字幕...';
+      container.appendChild(title);
+      
+      const subtitle = document.createElement('div');
+      subtitle.className = 'progress-subtitle';
+      subtitle.textContent = `區塊 ${(progress?.currentChunk ?? 0) + 1} / ${progress?.totalChunks ?? 1}`;
+      container.appendChild(subtitle);
+      
+      const barContainer = document.createElement('div');
+      barContainer.className = 'progress-bar-container';
+      const bar = document.createElement('div');
+      bar.className = 'progress-bar';
+      bar.style.width = `${percent}%`;
+      barContainer.appendChild(bar);
+      container.appendChild(barContainer);
+      
+      const stats = document.createElement('div');
+      stats.className = 'progress-stats';
+      const countSpan = document.createElement('span');
+      countSpan.textContent = `${progress?.translatedCount ?? 0} / ${progress?.totalCount ?? 0} 句`;
+      stats.appendChild(countSpan);
+      const timeSpan = document.createElement('span');
+      timeSpan.className = 'progress-time';
+      timeSpan.textContent = formatTimeRemaining(progress?.estimatedTimeRemaining);
+      stats.appendChild(timeSpan);
+      container.appendChild(stats);
       
       if (onCancel) {
-        const cancelBtn = el.querySelector('.progress-cancel');
-        cancelBtn?.addEventListener('click', () => void onCancel());
+        const cancelBtn = document.createElement('button');
+        cancelBtn.className = 'progress-cancel';
+        cancelBtn.textContent = '取消';
+        cancelBtn.addEventListener('click', () => void onCancel());
+        container.appendChild(cancelBtn);
       }
     } else if (state === 'error') {
-      el.innerHTML = `
-        <div class="progress-container">
-          <div class="progress-icon">❌</div>
-          <div class="progress-title">翻譯失敗</div>
-          <div class="error-message">${error || '發生未知錯誤'}</div>
-          ${retryable ? '<button class="retry-button">重試</button>' : ''}
-          <button class="progress-cancel">關閉</button>
-        </div>
-      `;
+      const icon = document.createElement('div');
+      icon.className = 'progress-icon';
+      icon.textContent = '❌';
+      container.appendChild(icon);
       
-      const closeBtn = el.querySelector('.progress-cancel');
-      closeBtn?.addEventListener('click', () => {
+      const title = document.createElement('div');
+      title.className = 'progress-title';
+      title.textContent = '翻譯失敗';
+      container.appendChild(title);
+      
+      const errorMsg = document.createElement('div');
+      errorMsg.className = 'error-message';
+      errorMsg.textContent = error || '發生未知錯誤';
+      container.appendChild(errorMsg);
+      
+      if (retryable) {
+        const retryBtn = document.createElement('button');
+        retryBtn.className = 'retry-button';
+        retryBtn.textContent = '重試';
+        container.appendChild(retryBtn);
+      }
+      
+      const closeBtn = document.createElement('button');
+      closeBtn.className = 'progress-cancel';
+      closeBtn.textContent = '關閉';
+      closeBtn.addEventListener('click', () => {
         visible = false;
         el.remove();
       });
+      container.appendChild(closeBtn);
     } else if (state === 'complete') {
-      el.innerHTML = `
-        <div class="progress-container">
-          <div class="progress-icon">✅</div>
-          <div class="progress-title">翻譯完成！</div>
-          <div class="progress-subtitle">
-            已翻譯 ${progress?.totalCount ?? 0} 句字幕
-          </div>
-        </div>
-      `;
+      const icon = document.createElement('div');
+      icon.className = 'progress-icon';
+      icon.textContent = '✅';
+      container.appendChild(icon);
+      
+      const title = document.createElement('div');
+      title.className = 'progress-title';
+      title.textContent = '翻譯完成！';
+      container.appendChild(title);
+      
+      const subtitle = document.createElement('div');
+      subtitle.className = 'progress-subtitle';
+      subtitle.textContent = `已翻譯 ${progress?.totalCount ?? 0} 句字幕`;
+      container.appendChild(subtitle);
       
       // Auto-hide after 2 seconds
       setTimeout(() => {
@@ -297,6 +208,8 @@ export function createProgressOverlay(options: ProgressOverlayOptions = {}): Pro
         setTimeout(() => el.remove(), 300);
       }, 2000);
     }
+    
+    el.appendChild(container);
   }
   
   /**
@@ -330,7 +243,7 @@ export function createProgressOverlay(options: ProgressOverlayOptions = {}): Pro
     show(): void {
       if (visible) return;
       
-      injectStyles();
+      // CSS is loaded via manifest.json content_scripts for Trusted Types compliance
       
       const container = findVideoContainer();
       if (!container) {

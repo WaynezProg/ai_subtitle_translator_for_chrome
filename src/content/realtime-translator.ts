@@ -1,0 +1,705 @@
+/**
+ * Real-time Subtitle Translator
+ * 
+ * Two modes:
+ * 1. Time-sync mode: Uses pre-translated cues synced to video time
+ * 2. DOM observer mode: Monitors YouTube's subtitle DOM for changes
+ */
+
+import type { Platform } from '../shared/types/subtitle';
+
+// ============================================================================
+// Types
+// ============================================================================
+
+interface TranslationCache {
+  [sourceText: string]: string;
+}
+
+/** Pre-translated cue with timing info */
+interface TranslatedCue {
+  startTime: number;
+  endTime: number;
+  originalText: string;
+  translatedText: string;
+}
+
+interface RealtimeTranslatorOptions {
+  platform: Platform;
+  targetLanguage: string;
+  onTranslationRequest: (text: string) => Promise<string>;
+  showOriginal?: boolean;
+  hideNativeSubtitles?: boolean;
+  /** Pre-translated cues for time-sync mode */
+  translatedCues?: TranslatedCue[];
+}
+
+type TranslatorState = 'idle' | 'active' | 'paused';
+
+// ============================================================================
+// Styles
+// ============================================================================
+
+const SUBTITLE_STYLES = `
+  .ai-subtitle-overlay {
+    position: absolute;
+    bottom: 10%;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 2147483647;
+    pointer-events: none;
+    width: 90%;
+    max-width: 1200px;
+    text-align: center;
+  }
+  
+  .ai-subtitle-text {
+    display: inline-block;
+    background: rgba(0, 0, 0, 0.85);
+    color: #fff;
+    padding: 16px 32px;
+    border-radius: 8px;
+    font-size: 28px;
+    font-weight: 500;
+    line-height: 1.5;
+    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.9);
+    max-width: 100%;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  }
+  
+  .ai-subtitle-original {
+    display: block;
+    font-size: 20px;
+    opacity: 0.75;
+    margin-bottom: 8px;
+    font-weight: 400;
+  }
+  
+  .ai-subtitle-translated {
+    display: block;
+    font-size: 32px;
+    font-weight: 600;
+  }
+  
+  /* Hide YouTube native subtitles when our translator is active */
+  .ai-subtitle-hide-native .ytp-caption-window-container,
+  .ai-subtitle-hide-native .caption-window {
+    opacity: 0 !important;
+    pointer-events: none !important;
+  }
+  
+  /* Hide Netflix native subtitles */
+  .ai-subtitle-hide-netflix .player-timedtext,
+  .ai-subtitle-hide-netflix .player-timedtext-text-container {
+    display: none !important;
+    visibility: hidden !important;
+  }
+`;
+
+// ============================================================================
+// Realtime Translator Class
+// ============================================================================
+
+export class RealtimeTranslator {
+  private options: RealtimeTranslatorOptions;
+  private cache: TranslationCache = {};
+  private observer: MutationObserver | null = null;
+  private state: TranslatorState = 'idle';
+  private styleElement: HTMLStyleElement | null = null;
+  private overlayElement: HTMLElement | null = null;
+  private videoElement: HTMLVideoElement | null = null;
+  private timeUpdateHandler: (() => void) | null = null;
+  private seekHandler: (() => void) | null = null;
+  private currentCueIndex: number = -1;
+  private lastDisplayedText: string = '';
+  private lastUpdateTime: number = 0;
+  private pendingTranslations: Map<string, Promise<string>> = new Map();
+  private translateDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  
+  // Time offset in milliseconds (positive = subtitles are ahead, negative = subtitles are behind)
+  private timeOffset: number = 0;
+  private timeOffsetCalibrated: boolean = false;
+  
+  // Throttle interval for timeupdate (ms) - update at most every 250ms for performance
+  private static readonly TIME_UPDATE_THROTTLE = 250;
+  
+  constructor(options: RealtimeTranslatorOptions) {
+    this.options = {
+      showOriginal: true,
+      hideNativeSubtitles: true,
+      ...options,
+    };
+  }
+  
+  /**
+   * Set time offset for subtitle synchronization
+   * @param offsetMs Offset in milliseconds (positive = delay subtitles, negative = advance subtitles)
+   */
+  setTimeOffset(offsetMs: number): void {
+    this.timeOffset = offsetMs;
+    this.timeOffsetCalibrated = true;
+    console.log(`[RealtimeTranslator] Time offset set to ${offsetMs}ms`);
+    // Force update with new offset
+    this.onTimeUpdateImmediate();
+  }
+  
+  /**
+   * Get current time offset
+   */
+  getTimeOffset(): number {
+    return this.timeOffset;
+  }
+  
+  /**
+   * Auto-calibrate time offset by finding the first cue
+   */
+  private autoCalibrate(): void {
+    if (this.timeOffsetCalibrated || !this.videoElement || !this.options.translatedCues) {
+      return;
+    }
+    
+    const cues = this.options.translatedCues;
+    if (cues.length === 0) return;
+    
+    // Find the first cue's start time
+    const firstCueStart = cues[0].startTime;
+    
+    // If first cue starts very late (> 30 seconds), it might indicate an offset issue
+    // Netflix sometimes has credits/intro that aren't in subtitles
+    if (firstCueStart > 30000) {
+      console.log(`[RealtimeTranslator] First cue starts at ${firstCueStart}ms - may need offset adjustment`);
+    }
+    
+    this.timeOffsetCalibrated = true;
+  }
+  
+  /**
+   * Start the translator
+   */
+  start(): void {
+    if (this.state === 'active') {
+      console.log('[RealtimeTranslator] Already active');
+      return;
+    }
+    
+    console.log('[RealtimeTranslator] Starting...');
+    this.state = 'active';
+    
+    // Inject styles
+    this.injectStyles();
+    
+    // Create overlay
+    this.createOverlay();
+    
+    // Hide native subtitles
+    if (this.options.hideNativeSubtitles) {
+      this.hideNativeSubtitles();
+    }
+    
+    // Choose mode based on whether we have pre-translated cues
+    if (this.options.translatedCues && this.options.translatedCues.length > 0) {
+      console.log('[RealtimeTranslator] Using time-sync mode with', this.options.translatedCues.length, 'cues');
+      this.startTimeSyncMode();
+    } else {
+      console.log('[RealtimeTranslator] Using DOM observer mode');
+      this.startObserverMode();
+    }
+  }
+  
+  /**
+   * Stop the translator
+   */
+  stop(): void {
+    console.log('[RealtimeTranslator] Stopping...');
+    this.state = 'idle';
+    
+    // Stop time sync
+    this.stopTimeSyncMode();
+    
+    // Stop observer
+    this.stopObserverMode();
+    
+    // Clear debounce timer
+    if (this.translateDebounceTimer) {
+      clearTimeout(this.translateDebounceTimer);
+      this.translateDebounceTimer = null;
+    }
+    
+    // Show native subtitles again
+    this.showNativeSubtitles();
+    
+    // Remove overlay
+    this.removeOverlay();
+    
+    // Remove styles
+    this.removeStyles();
+    
+    // Clear state
+    this.pendingTranslations.clear();
+    this.currentCueIndex = -1;
+    this.lastDisplayedText = '';
+    this.cache = {};
+  }
+  
+  /**
+   * Get current state
+   */
+  getState(): TranslatorState {
+    return this.state;
+  }
+  
+  // ============================================================================
+  // Time-Sync Mode (for pre-translated subtitles)
+  // ============================================================================
+  
+  private startTimeSyncMode(): void {
+    // Find video element
+    this.videoElement = document.querySelector('video');
+    if (!this.videoElement) {
+      console.warn('[RealtimeTranslator] Video element not found');
+      return;
+    }
+    
+    // Throttled handler for regular time updates (performance optimization)
+    this.timeUpdateHandler = () => this.onTimeUpdateThrottled();
+    
+    // Immediate handler for seek events (responsive UX)
+    this.seekHandler = () => this.onTimeUpdateImmediate();
+    
+    // Regular time updates - throttled for performance
+    this.videoElement.addEventListener('timeupdate', this.timeUpdateHandler);
+    
+    // Seek events - immediate response for good UX
+    this.videoElement.addEventListener('seeking', this.seekHandler);
+    this.videoElement.addEventListener('seeked', this.seekHandler);
+    this.videoElement.addEventListener('playing', this.seekHandler);
+    this.videoElement.addEventListener('play', this.seekHandler);
+    
+    // Immediately update to current position
+    this.onTimeUpdateImmediate();
+    
+    console.log('[RealtimeTranslator] Time-sync mode started');
+  }
+  
+  private stopTimeSyncMode(): void {
+    if (this.videoElement) {
+      if (this.timeUpdateHandler) {
+        this.videoElement.removeEventListener('timeupdate', this.timeUpdateHandler);
+      }
+      if (this.seekHandler) {
+        this.videoElement.removeEventListener('seeking', this.seekHandler);
+        this.videoElement.removeEventListener('seeked', this.seekHandler);
+        this.videoElement.removeEventListener('playing', this.seekHandler);
+        this.videoElement.removeEventListener('play', this.seekHandler);
+      }
+    }
+    this.videoElement = null;
+    this.timeUpdateHandler = null;
+    this.seekHandler = null;
+  }
+  
+  /**
+   * Throttled time update - called frequently but only processes every N ms
+   */
+  private onTimeUpdateThrottled(): void {
+    const now = Date.now();
+    if (now - this.lastUpdateTime < RealtimeTranslator.TIME_UPDATE_THROTTLE) {
+      return; // Skip this update
+    }
+    this.lastUpdateTime = now;
+    this.onTimeUpdateImmediate();
+  }
+  
+  /**
+   * Immediate time update - for seek events and initial load
+   */
+  private onTimeUpdateImmediate(): void {
+    if (this.state !== 'active' || !this.videoElement || !this.options.translatedCues) {
+      return;
+    }
+    
+    // Auto-calibrate on first update
+    this.autoCalibrate();
+    
+    // Apply time offset: subtract offset from video time to match subtitle time
+    // If subtitles are ahead (showing too early), use positive offset
+    // If subtitles are behind (showing too late), use negative offset
+    const currentTime = (this.videoElement.currentTime * 1000) - this.timeOffset;
+    const cues = this.options.translatedCues;
+    
+    // Use binary search for better performance with large cue lists
+    const activeCue = this.findActiveCue(cues, currentTime);
+    
+    // Update display if cue changed
+    if (activeCue) {
+      const displayText = activeCue.translatedText;
+      if (displayText !== this.lastDisplayedText) {
+        this.lastDisplayedText = displayText;
+        this.updateOverlay(activeCue.originalText, activeCue.translatedText);
+      }
+    } else {
+      // No active cue, clear display
+      if (this.lastDisplayedText !== '') {
+        this.lastDisplayedText = '';
+        this.clearOverlay();
+      }
+    }
+  }
+  
+  /**
+   * Binary search to find active cue - O(log n) instead of O(n)
+   */
+  private findActiveCue(cues: TranslatedCue[], currentTime: number): TranslatedCue | null {
+    let left = 0;
+    let right = cues.length - 1;
+    
+    while (left <= right) {
+      const mid = Math.floor((left + right) / 2);
+      const cue = cues[mid];
+      
+      if (currentTime >= cue.startTime && currentTime < cue.endTime) {
+        return cue;
+      } else if (currentTime < cue.startTime) {
+        right = mid - 1;
+      } else {
+        left = mid + 1;
+      }
+    }
+    
+    return null;
+  }
+  
+  // ============================================================================
+  // DOM Observer Mode (fallback for real-time translation)
+  // ============================================================================
+  
+  private startObserverMode(): void {
+    const container = this.findCaptionContainer();
+    
+    if (!container) {
+      console.log('[RealtimeTranslator] Caption container not found, will retry...');
+      setTimeout(() => {
+        if (this.state === 'active') {
+          this.startObserverMode();
+        }
+      }, 1000);
+      return;
+    }
+    
+    console.log('[RealtimeTranslator] Caption container found');
+    
+    this.observer = new MutationObserver(() => {
+      if (this.state === 'active') {
+        this.onSubtitleChange();
+      }
+    });
+    
+    this.observer.observe(container, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+    });
+  }
+  
+  private stopObserverMode(): void {
+    if (this.observer) {
+      this.observer.disconnect();
+      this.observer = null;
+    }
+  }
+  
+  private findCaptionContainer(): Element | null {
+    const selectors = [
+      '.ytp-caption-window-container',
+      '.caption-window',
+      '#movie_player .ytp-caption-window-container',
+    ];
+    
+    for (const selector of selectors) {
+      const container = document.querySelector(selector);
+      if (container) return container;
+    }
+    
+    return null;
+  }
+  
+  private onSubtitleChange(): void {
+    const container = this.findCaptionContainer();
+    if (!container) return;
+    
+    // Get text from caption segments
+    const segments = container.querySelectorAll('.ytp-caption-segment');
+    let fullText = '';
+    
+    if (segments.length > 0) {
+      fullText = Array.from(segments)
+        .map(s => s.textContent?.trim())
+        .filter(Boolean)
+        .join(' ');
+    }
+    
+    // Clean and validate text
+    fullText = this.cleanSubtitleText(fullText);
+    if (!fullText || fullText === this.lastDisplayedText || fullText.length < 2) {
+      return;
+    }
+    
+    this.lastDisplayedText = fullText;
+    this.debounceTranslate(fullText);
+  }
+  
+  private debounceTranslate(text: string): void {
+    if (this.translateDebounceTimer) {
+      clearTimeout(this.translateDebounceTimer);
+    }
+    
+    // Show original immediately
+    this.updateOverlay(text, '', true);
+    
+    this.translateDebounceTimer = setTimeout(() => {
+      void this.doTranslate(text);
+    }, 300);
+  }
+  
+  private async doTranslate(text: string): Promise<void> {
+    if (text !== this.lastDisplayedText) return;
+    
+    try {
+      const translation = await this.translateText(text);
+      if (text === this.lastDisplayedText && this.state === 'active') {
+        this.updateOverlay(text, translation);
+      }
+    } catch (error) {
+      console.error('[RealtimeTranslator] Translation error:', error);
+    }
+  }
+  
+  private async translateText(text: string): Promise<string> {
+    // Check cache
+    if (this.cache[text]) {
+      return this.cache[text];
+    }
+    
+    // Check pending
+    if (this.pendingTranslations.has(text)) {
+      return this.pendingTranslations.get(text)!;
+    }
+    
+    const promise = this.options.onTranslationRequest(text)
+      .then(result => {
+        this.cache[text] = result;
+        this.pendingTranslations.delete(text);
+        return result;
+      })
+      .catch(error => {
+        this.pendingTranslations.delete(text);
+        throw error;
+      });
+    
+    this.pendingTranslations.set(text, promise);
+    return promise;
+  }
+  
+  private cleanSubtitleText(text: string): string {
+    const patterns = [
+      /日文\s*\(自動產生\)/g,
+      /英文\s*\(自動產生\)/g,
+      /中文\s*\(自動產生\)/g,
+      /\(自動產生\)/g,
+      /按一下.*$/g,
+      /點擊.*$/g,
+      /Auto-generated/gi,
+    ];
+    
+    let cleaned = text;
+    for (const pattern of patterns) {
+      cleaned = cleaned.replace(pattern, '');
+    }
+    
+    return cleaned.trim();
+  }
+  
+  // ============================================================================
+  // UI Methods
+  // ============================================================================
+  
+  private injectStyles(): void {
+    if (this.styleElement) return;
+    
+    this.styleElement = document.createElement('style');
+    this.styleElement.id = 'ai-subtitle-translator-styles';
+    this.styleElement.textContent = SUBTITLE_STYLES;
+    document.head.appendChild(this.styleElement);
+  }
+  
+  private removeStyles(): void {
+    if (this.styleElement) {
+      this.styleElement.remove();
+      this.styleElement = null;
+    }
+  }
+  
+  private createOverlay(): void {
+    if (this.overlayElement) return;
+    
+    // Platform-specific player selectors
+    const playerSelectors = [
+      // YouTube
+      '#movie_player',
+      '.html5-video-player',
+      // Netflix
+      '.watch-video--player-view',
+      '.VideoContainer',
+      '[data-uia="video-canvas"]',
+      // Disney+
+      '.btm-media-client-element',
+      // Prime Video
+      '.webPlayerContainer',
+      '.dv-player-fullscreen',
+      // Generic fallback
+      'video',
+    ];
+    
+    let player: Element | null = null;
+    for (const selector of playerSelectors) {
+      player = document.querySelector(selector);
+      if (player) {
+        console.log('[RealtimeTranslator] Found player container:', selector);
+        break;
+      }
+    }
+    
+    if (!player) {
+      console.warn('[RealtimeTranslator] Video player not found, using body as fallback');
+      player = document.body;
+    }
+    
+    // For video element, use its parent
+    if (player.tagName === 'VIDEO') {
+      player = player.parentElement || document.body;
+    }
+    
+    this.overlayElement = document.createElement('div');
+    this.overlayElement.className = 'ai-subtitle-overlay';
+    this.overlayElement.id = 'ai-subtitle-overlay';
+    
+    // Ensure parent has position for absolute positioning
+    const computedStyle = window.getComputedStyle(player);
+    if (computedStyle.position === 'static') {
+      (player as HTMLElement).style.position = 'relative';
+    }
+    
+    player.appendChild(this.overlayElement);
+    console.log('[RealtimeTranslator] Overlay created and attached');
+  }
+  
+  private removeOverlay(): void {
+    if (this.overlayElement) {
+      this.overlayElement.remove();
+      this.overlayElement = null;
+    }
+  }
+  
+  private hideNativeSubtitles(): void {
+    // YouTube
+    const ytPlayer = document.querySelector('#movie_player, .html5-video-player');
+    if (ytPlayer) {
+      ytPlayer.classList.add('ai-subtitle-hide-native');
+    }
+    
+    // Netflix - hide the native subtitle container with multiple methods for reliability
+    const netflixSelectors = [
+      '.player-timedtext',
+      '.player-timedtext-text-container',
+      '[data-uia="player"]  .player-timedtext',
+    ];
+    
+    for (const selector of netflixSelectors) {
+      const elements = document.querySelectorAll(selector);
+      elements.forEach(el => {
+        (el as HTMLElement).style.cssText = 'display: none !important; visibility: hidden !important; opacity: 0 !important;';
+      });
+    }
+    
+    // Also add class to body for CSS-based hiding
+    document.body.classList.add('ai-subtitle-hide-netflix');
+  }
+  
+  private showNativeSubtitles(): void {
+    // YouTube
+    const ytPlayer = document.querySelector('#movie_player, .html5-video-player');
+    if (ytPlayer) {
+      ytPlayer.classList.remove('ai-subtitle-hide-native');
+    }
+    
+    // Netflix - restore native subtitles
+    const netflixSelectors = [
+      '.player-timedtext',
+      '.player-timedtext-text-container',
+      '[data-uia="player"] .player-timedtext',
+    ];
+    
+    for (const selector of netflixSelectors) {
+      const elements = document.querySelectorAll(selector);
+      elements.forEach(el => {
+        (el as HTMLElement).style.cssText = '';
+      });
+    }
+    
+    document.body.classList.remove('ai-subtitle-hide-netflix');
+  }
+  
+  private updateOverlay(originalText: string, translatedText: string, isLoading: boolean = false): void {
+    if (!this.overlayElement) {
+      console.warn('[RealtimeTranslator] updateOverlay called but overlay not created');
+      // Try to create it now
+      this.createOverlay();
+      if (!this.overlayElement) {
+        console.error('[RealtimeTranslator] Failed to create overlay');
+        return;
+      }
+    }
+    
+    // Clear
+    while (this.overlayElement.firstChild) {
+      this.overlayElement.removeChild(this.overlayElement.firstChild);
+    }
+    
+    if (!translatedText && !originalText) return;
+    
+    const container = document.createElement('div');
+    container.className = 'ai-subtitle-text';
+    
+    if (this.options.showOriginal && originalText) {
+      const originalSpan = document.createElement('span');
+      originalSpan.className = 'ai-subtitle-original';
+      originalSpan.textContent = originalText;
+      container.appendChild(originalSpan);
+    }
+    
+    const translatedSpan = document.createElement('span');
+    translatedSpan.className = 'ai-subtitle-translated';
+    translatedSpan.textContent = isLoading ? '翻譯中...' : (translatedText || originalText);
+    container.appendChild(translatedSpan);
+    
+    this.overlayElement.appendChild(container);
+  }
+  
+  private clearOverlay(): void {
+    if (this.overlayElement) {
+      while (this.overlayElement.firstChild) {
+        this.overlayElement.removeChild(this.overlayElement.firstChild);
+      }
+    }
+  }
+}
+
+// ============================================================================
+// Factory Function
+// ============================================================================
+
+export function createRealtimeTranslator(options: RealtimeTranslatorOptions): RealtimeTranslator {
+  return new RealtimeTranslator(options);
+}
+
+export type { TranslatedCue, RealtimeTranslatorOptions };

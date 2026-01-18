@@ -514,6 +514,8 @@ export class TranslationService {
         return 'gpt-4o-mini';
       case 'ollama':
         return 'llama3';
+      case 'google-translate':
+        return 'nmt';
       default:
         return 'gpt-4';
     }

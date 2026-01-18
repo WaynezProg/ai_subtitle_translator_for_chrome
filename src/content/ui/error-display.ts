@@ -57,144 +57,22 @@ const TYPE_ICONS: Record<ToastOptions['type'], string> = {
 };
 
 // ============================================================================
-// Styles
-// ============================================================================
-
-const TOAST_STYLES = `
-  #${TOAST_CONTAINER_ID} {
-    position: fixed;
-    bottom: 24px;
-    right: 24px;
-    z-index: 2147483647;
-    display: flex;
-    flex-direction: column-reverse;
-    gap: 8px;
-    font-family: system-ui, -apple-system, sans-serif;
-  }
-  
-  .ai-subtitle-toast {
-    background: #323232;
-    color: #fff;
-    padding: 12px 16px;
-    border-radius: 8px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    min-width: 280px;
-    max-width: 400px;
-    animation: toastSlideIn 0.3s ease-out;
-  }
-  
-  @keyframes toastSlideIn {
-    from {
-      opacity: 0;
-      transform: translateX(100%);
-    }
-    to {
-      opacity: 1;
-      transform: translateX(0);
-    }
-  }
-  
-  .ai-subtitle-toast.removing {
-    animation: toastSlideOut 0.2s ease-in forwards;
-  }
-  
-  @keyframes toastSlideOut {
-    from {
-      opacity: 1;
-      transform: translateX(0);
-    }
-    to {
-      opacity: 0;
-      transform: translateX(100%);
-    }
-  }
-  
-  .ai-subtitle-toast.error {
-    background: #d32f2f;
-  }
-  
-  .ai-subtitle-toast.warning {
-    background: #f57c00;
-  }
-  
-  .ai-subtitle-toast.success {
-    background: #388e3c;
-  }
-  
-  .ai-subtitle-toast.info {
-    background: #1976d2;
-  }
-  
-  .ai-subtitle-toast .toast-icon {
-    font-size: 18px;
-    flex-shrink: 0;
-  }
-  
-  .ai-subtitle-toast .toast-content {
-    flex: 1;
-    font-size: 14px;
-    line-height: 1.4;
-  }
-  
-  .ai-subtitle-toast .toast-action {
-    background: rgba(255, 255, 255, 0.2);
-    border: none;
-    color: #fff;
-    padding: 6px 12px;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 13px;
-    font-weight: 500;
-    white-space: nowrap;
-    transition: background 0.2s ease;
-  }
-  
-  .ai-subtitle-toast .toast-action:hover {
-    background: rgba(255, 255, 255, 0.3);
-  }
-  
-  .ai-subtitle-toast .toast-close {
-    background: none;
-    border: none;
-    color: rgba(255, 255, 255, 0.7);
-    cursor: pointer;
-    padding: 4px;
-    font-size: 16px;
-    line-height: 1;
-  }
-  
-  .ai-subtitle-toast .toast-close:hover {
-    color: #fff;
-  }
-`;
-
-// ============================================================================
 // Implementation
 // ============================================================================
+// Note: CSS is loaded via manifest.json content_scripts for Trusted Types compliance
 
 let containerElement: HTMLDivElement | null = null;
 
 /**
  * Initialize toast container
+ * CSS is loaded via manifest.json content_scripts for Trusted Types compliance
  */
 function ensureContainer(): HTMLDivElement {
   if (containerElement && document.body.contains(containerElement)) {
     return containerElement;
   }
   
-  // Inject styles
-  const styleId = 'ai-subtitle-toast-styles';
-  if (!document.getElementById(styleId)) {
-    const style = document.createElement('style');
-    style.id = styleId;
-    style.textContent = TOAST_STYLES;
-    document.head.appendChild(style);
-  }
-  
-  // Create container
+  // Create container (CSS is loaded via manifest.json)
   containerElement = document.createElement('div');
   containerElement.id = TOAST_CONTAINER_ID;
   document.body.appendChild(containerElement);
@@ -212,24 +90,35 @@ export function showToast(options: ToastOptions): () => void {
   const toast = document.createElement('div');
   toast.className = `ai-subtitle-toast ${type}`;
   
-  toast.innerHTML = `
-    <span class="toast-icon">${TYPE_ICONS[type]}</span>
-    <span class="toast-content">${message}</span>
-    ${actionText ? `<button class="toast-action">${actionText}</button>` : ''}
-    <button class="toast-close">×</button>
-  `;
+  // Create toast content using DOM APIs (Trusted Types compliance)
+  const iconSpan = document.createElement('span');
+  iconSpan.className = 'toast-icon';
+  iconSpan.textContent = TYPE_ICONS[type];
+  toast.appendChild(iconSpan);
   
-  // Bind events
-  const closeBtn = toast.querySelector('.toast-close');
-  closeBtn?.addEventListener('click', () => removeToast(toast));
+  const contentSpan = document.createElement('span');
+  contentSpan.className = 'toast-content';
+  contentSpan.textContent = message;
+  toast.appendChild(contentSpan);
   
-  if (actionText && onAction) {
-    const actionBtn = toast.querySelector('.toast-action');
-    actionBtn?.addEventListener('click', () => {
-      onAction();
-      removeToast(toast);
-    });
+  if (actionText) {
+    const actionBtn = document.createElement('button');
+    actionBtn.className = 'toast-action';
+    actionBtn.textContent = actionText;
+    if (onAction) {
+      actionBtn.addEventListener('click', () => {
+        onAction();
+        removeToast(toast);
+      });
+    }
+    toast.appendChild(actionBtn);
   }
+  
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'toast-close';
+  closeBtn.textContent = '×';
+  closeBtn.addEventListener('click', () => removeToast(toast));
+  toast.appendChild(closeBtn);
   
   container.appendChild(toast);
   
@@ -312,6 +201,8 @@ export function showWarningToast(message: string, duration = 5000): () => void {
  */
 export function clearAllToasts(): void {
   if (containerElement) {
-    containerElement.innerHTML = '';
+    while (containerElement.firstChild) {
+      containerElement.removeChild(containerElement.firstChild);
+    }
   }
 }

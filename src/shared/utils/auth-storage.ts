@@ -261,6 +261,8 @@ function getProviderDisplayName(type: ProviderType): string {
       return 'ChatGPT Plus (Subscription)';
     case 'ollama':
       return 'Ollama (Local)';
+    case 'google-translate':
+      return 'Google 翻譯 (Free)';
     default:
       return type;
   }

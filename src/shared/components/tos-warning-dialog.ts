@@ -238,28 +238,62 @@ export function showTosWarningDialog(options: TosDialogOptions): void {
   dialog.setAttribute('aria-labelledby', 'tos-title');
   dialog.setAttribute('aria-modal', 'true');
   
-  // Build dialog content
-  dialog.innerHTML = `
-    <h2 class="tos-title" id="tos-title">${texts.title}</h2>
-    <div class="tos-warnings">
-      <ul>
-        ${texts.warnings.map(w => `<li>${w}</li>`).join('')}
-      </ul>
-    </div>
-    <div class="tos-checkbox-container">
-      <input type="checkbox" id="tos-accept-checkbox" class="tos-checkbox">
-      <label for="tos-accept-checkbox" class="tos-checkbox-label">${texts.checkboxLabel}</label>
-    </div>
-    <div class="tos-buttons">
-      <button type="button" class="tos-button tos-button--decline">${texts.declineButton}</button>
-      <button type="button" class="tos-button tos-button--accept" disabled>${texts.acceptButton}</button>
-    </div>
-  `;
-  
-  // Get elements
-  const checkbox = dialog.querySelector('#tos-accept-checkbox') as HTMLInputElement;
-  const acceptButton = dialog.querySelector('.tos-button--accept') as HTMLButtonElement;
-  const declineButton = dialog.querySelector('.tos-button--decline') as HTMLButtonElement;
+  // Build dialog content using DOM APIs (Trusted Types compliant)
+  // Title
+  const title = document.createElement('h2');
+  title.className = 'tos-title';
+  title.id = 'tos-title';
+  title.textContent = texts.title;
+  dialog.appendChild(title);
+
+  // Warnings container
+  const warningsDiv = document.createElement('div');
+  warningsDiv.className = 'tos-warnings';
+  const warningsList = document.createElement('ul');
+  texts.warnings.forEach(warning => {
+    const li = document.createElement('li');
+    li.textContent = warning;
+    warningsList.appendChild(li);
+  });
+  warningsDiv.appendChild(warningsList);
+  dialog.appendChild(warningsDiv);
+
+  // Checkbox container
+  const checkboxContainer = document.createElement('div');
+  checkboxContainer.className = 'tos-checkbox-container';
+
+  const checkbox = document.createElement('input');
+  checkbox.type = 'checkbox';
+  checkbox.id = 'tos-accept-checkbox';
+  checkbox.className = 'tos-checkbox';
+  checkboxContainer.appendChild(checkbox);
+
+  const checkboxLabel = document.createElement('label');
+  checkboxLabel.htmlFor = 'tos-accept-checkbox';
+  checkboxLabel.className = 'tos-checkbox-label';
+  checkboxLabel.textContent = texts.checkboxLabel;
+  checkboxContainer.appendChild(checkboxLabel);
+
+  dialog.appendChild(checkboxContainer);
+
+  // Buttons container
+  const buttonsDiv = document.createElement('div');
+  buttonsDiv.className = 'tos-buttons';
+
+  const declineButton = document.createElement('button');
+  declineButton.type = 'button';
+  declineButton.className = 'tos-button tos-button--decline';
+  declineButton.textContent = texts.declineButton;
+  buttonsDiv.appendChild(declineButton);
+
+  const acceptButton = document.createElement('button');
+  acceptButton.type = 'button';
+  acceptButton.className = 'tos-button tos-button--accept';
+  acceptButton.disabled = true;
+  acceptButton.textContent = texts.acceptButton;
+  buttonsDiv.appendChild(acceptButton);
+
+  dialog.appendChild(buttonsDiv);
   
   // Wire up checkbox
   checkbox.addEventListener('change', () => {

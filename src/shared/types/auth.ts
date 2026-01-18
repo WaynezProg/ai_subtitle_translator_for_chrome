@@ -7,20 +7,29 @@
 /**
  * Supported provider types
  */
-export type ProviderType = 
-  | 'claude-api' 
-  | 'openai-api' 
-  | 'ollama' 
-  | 'claude-subscription' 
-  | 'chatgpt-subscription';
+export type ProviderType =
+  | 'claude-api'
+  | 'openai-api'
+  | 'ollama'
+  | 'claude-subscription'
+  | 'chatgpt-subscription'
+  | 'google-translate';
 
 /**
  * Provider credentials union type
  */
-export type ProviderCredentials = 
-  | ApiKeyCredentials 
-  | OllamaCredentials 
-  | SubscriptionCredentials;
+export type ProviderCredentials =
+  | ApiKeyCredentials
+  | OllamaCredentials
+  | SubscriptionCredentials
+  | GoogleTranslateCredentials;
+
+/**
+ * Google Translate credentials (no API key needed for free tier)
+ */
+export interface GoogleTranslateCredentials {
+  type: 'google-translate';
+}
 
 /**
  * API key credentials for official APIs
@@ -101,7 +110,8 @@ export function getProviderDisplayName(type: ProviderType): string {
     'chatgpt-subscription': 'ChatGPT Plus (訂閱)',
     'claude-api': 'Claude API',
     'openai-api': 'OpenAI API',
-    'ollama': 'Ollama (本地)'
+    'ollama': 'Ollama (本地)',
+    'google-translate': 'Google 翻譯 (免費)',
   };
   return displayNames[type];
 }

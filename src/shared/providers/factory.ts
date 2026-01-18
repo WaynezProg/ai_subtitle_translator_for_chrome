@@ -117,6 +117,7 @@ import { OpenAIApiProvider } from './openai-api-provider';
 import { ClaudeSubscriptionProvider } from './claude-subscription-provider';
 import { ChatGPTSubscriptionProvider } from './chatgpt-subscription-provider';
 import { OllamaProvider } from './ollama-provider';
+import { GoogleTranslateProvider } from './google-translate-provider';
 
 // Register all available providers
 ProviderFactory.register('claude-api', (config) => new ClaudeApiProvider(config));
@@ -124,6 +125,7 @@ ProviderFactory.register('openai-api', (config) => new OpenAIApiProvider(config)
 ProviderFactory.register('claude-subscription', (config) => new ClaudeSubscriptionProvider(config));
 ProviderFactory.register('chatgpt-subscription', (config) => new ChatGPTSubscriptionProvider(config));
 ProviderFactory.register('ollama', (config) => new OllamaProvider(config));
+ProviderFactory.register('google-translate', (config) => new GoogleTranslateProvider(config));
 
 // ============================================================================
 // Convenience Factory Function
@@ -144,13 +146,21 @@ export function createProviderFromConfig(
   model?: string
 ): TranslationProvider | null {
   // Create a minimal config object that providers can use
+  let credentials: AuthProvider['credentials'];
+  
+  if (providerType === 'ollama') {
+    credentials = { type: 'ollama', endpoint: apiKey || 'http://localhost:11434', model: model || '' };
+  } else if (providerType === 'google-translate') {
+    credentials = { type: 'google-translate' };
+  } else if (providerType.includes('subscription')) {
+    credentials = { type: 'subscription', encryptedSessionToken: '' };
+  } else {
+    credentials = { type: 'api-key', encryptedApiKey: apiKey || '', model: model || '' };
+  }
+  
   const config: AuthProvider = {
     type: providerType,
-    credentials: providerType === 'ollama' 
-      ? { type: 'ollama', endpoint: apiKey || 'http://localhost:11434', model: model || '' }
-      : providerType.includes('subscription')
-        ? { type: 'subscription', encryptedSessionToken: '' }
-        : { type: 'api-key', encryptedApiKey: apiKey || '', model: model || '' },
+    credentials,
     status: { state: 'unconfigured' },
     configuredAt: new Date().toISOString(),
   };

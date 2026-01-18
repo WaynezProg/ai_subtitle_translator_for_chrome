@@ -100,181 +100,9 @@ const STATE_CONFIG: Record<Exclude<FloatingButtonState, 'hidden'>, {
 };
 
 // ============================================================================
-// Styles
-// ============================================================================
-
-const FLOATING_STYLES = `
-  #${CONTAINER_ID} {
-    position: absolute;
-    top: 16px;
-    right: 16px;
-    z-index: 2147483640;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    pointer-events: auto;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  }
-
-  #${CONTAINER_ID}.minimized {
-    top: 8px;
-    right: 8px;
-  }
-
-  #${BUTTON_ID} {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 10px 16px;
-    border: none;
-    border-radius: 24px;
-    cursor: pointer;
-    font-size: 14px;
-    font-weight: 500;
-    color: #ffffff;
-    background: rgba(33, 150, 243, 0.95);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3), 0 2px 4px rgba(0, 0, 0, 0.2);
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    white-space: nowrap;
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-  }
-
-  #${BUTTON_ID}:hover {
-    transform: scale(1.05);
-    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4), 0 3px 6px rgba(0, 0, 0, 0.25);
-  }
-
-  #${BUTTON_ID}:active {
-    transform: scale(0.98);
-  }
-
-  #${BUTTON_ID} .floating-icon {
-    font-size: 18px;
-    line-height: 1;
-  }
-
-  #${BUTTON_ID} .floating-label {
-    font-size: 14px;
-    font-weight: 500;
-  }
-
-  #${BUTTON_ID} .floating-progress {
-    display: none;
-    align-items: center;
-    gap: 8px;
-    margin-left: 4px;
-  }
-
-  #${BUTTON_ID} .floating-progress-bar {
-    width: 60px;
-    height: 4px;
-    background: rgba(255, 255, 255, 0.3);
-    border-radius: 2px;
-    overflow: hidden;
-  }
-
-  #${BUTTON_ID} .floating-progress-fill {
-    height: 100%;
-    background: #ffffff;
-    border-radius: 2px;
-    transition: width 0.3s ease;
-  }
-
-  #${BUTTON_ID} .floating-progress-text {
-    font-size: 12px;
-    min-width: 36px;
-    text-align: right;
-  }
-
-  #${BUTTON_ID}[data-state="translating"] .floating-progress {
-    display: flex;
-  }
-
-  #${BUTTON_ID}[data-state="translating"] .floating-icon {
-    animation: spin 1.5s linear infinite;
-  }
-
-  #${BUTTON_ID} .floating-close {
-    display: none;
-    margin-left: 4px;
-    padding: 2px;
-    background: rgba(255, 255, 255, 0.2);
-    border: none;
-    border-radius: 50%;
-    cursor: pointer;
-    font-size: 12px;
-    line-height: 1;
-    color: inherit;
-    transition: background 0.2s;
-  }
-
-  #${BUTTON_ID}:hover .floating-close {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  #${BUTTON_ID} .floating-close:hover {
-    background: rgba(255, 255, 255, 0.4);
-  }
-
-  /* Minimized state */
-  #${CONTAINER_ID}.minimized #${BUTTON_ID} {
-    padding: 8px;
-    border-radius: 50%;
-    width: 40px;
-    height: 40px;
-    justify-content: center;
-  }
-
-  #${CONTAINER_ID}.minimized #${BUTTON_ID} .floating-label,
-  #${CONTAINER_ID}.minimized #${BUTTON_ID} .floating-progress,
-  #${CONTAINER_ID}.minimized #${BUTTON_ID} .floating-close {
-    display: none !important;
-  }
-
-  #${CONTAINER_ID}.minimized #${BUTTON_ID} .floating-icon {
-    font-size: 20px;
-  }
-
-  /* Pulse animation for idle state to attract attention */
-  #${BUTTON_ID}[data-state="idle"] {
-    animation: attention-pulse 2s ease-in-out 3;
-  }
-
-  @keyframes attention-pulse {
-    0%, 100% {
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3), 0 2px 4px rgba(0, 0, 0, 0.2);
-    }
-    50% {
-      box-shadow: 0 4px 12px rgba(33, 150, 243, 0.6), 0 2px 4px rgba(33, 150, 243, 0.4), 0 0 20px rgba(33, 150, 243, 0.4);
-    }
-  }
-
-  @keyframes spin {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
-  }
-
-  /* Responsive adjustments */
-  @media (max-width: 768px) {
-    #${BUTTON_ID} {
-      padding: 8px 12px;
-      font-size: 12px;
-    }
-
-    #${BUTTON_ID} .floating-icon {
-      font-size: 16px;
-    }
-
-    #${BUTTON_ID} .floating-progress-bar {
-      width: 40px;
-    }
-  }
-`;
-
-// ============================================================================
 // Implementation
 // ============================================================================
+// Note: CSS is loaded via manifest.json content_scripts for Trusted Types compliance
 
 export function createFloatingButton(options: FloatingButtonOptions): FloatingButton {
   const { onClick, platform } = options;
@@ -286,7 +114,7 @@ export function createFloatingButton(options: FloatingButtonOptions): FloatingBu
   let isMinimized = false;
 
   /**
-   * Create button elements
+   * Create button elements using DOM APIs (no innerHTML for Trusted Types compliance)
    */
   function createElements(): { container: HTMLDivElement; button: HTMLButtonElement } {
     const container = document.createElement('div');
@@ -301,17 +129,44 @@ export function createFloatingButton(options: FloatingButtonOptions): FloatingBu
     button.style.background = config.bgColor;
     button.title = config.label;
 
-    button.innerHTML = `
-      <span class="floating-icon">${config.icon}</span>
-      <span class="floating-label">${config.label}</span>
-      <div class="floating-progress">
-        <div class="floating-progress-bar">
-          <div class="floating-progress-fill" style="width: 0%;"></div>
-        </div>
-        <span class="floating-progress-text">0%</span>
-      </div>
-      <button class="floating-close" title="最小化">✕</button>
-    `;
+    // Create icon span
+    const iconSpan = document.createElement('span');
+    iconSpan.className = 'floating-icon';
+    iconSpan.textContent = config.icon;
+    button.appendChild(iconSpan);
+
+    // Create label span
+    const labelSpan = document.createElement('span');
+    labelSpan.className = 'floating-label';
+    labelSpan.textContent = config.label;
+    button.appendChild(labelSpan);
+
+    // Create progress container
+    const progressDiv = document.createElement('div');
+    progressDiv.className = 'floating-progress';
+    
+    const progressBar = document.createElement('div');
+    progressBar.className = 'floating-progress-bar';
+    
+    const progressFill = document.createElement('div');
+    progressFill.className = 'floating-progress-fill';
+    progressFill.style.width = '0%';
+    progressBar.appendChild(progressFill);
+    progressDiv.appendChild(progressBar);
+    
+    const progressText = document.createElement('span');
+    progressText.className = 'floating-progress-text';
+    progressText.textContent = '0%';
+    progressDiv.appendChild(progressText);
+    
+    button.appendChild(progressDiv);
+
+    // Create close button
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'floating-close';
+    closeBtn.title = '最小化';
+    closeBtn.textContent = '✕';
+    button.appendChild(closeBtn);
 
     // Main button click
     button.addEventListener('click', (e) => {
@@ -347,19 +202,6 @@ export function createFloatingButton(options: FloatingButtonOptions): FloatingBu
     if (container) {
       container.classList.toggle('minimized', isMinimized);
     }
-  }
-
-  /**
-   * Inject styles
-   */
-  function injectStyles(): void {
-    const styleId = 'ai-subtitle-floating-styles';
-    if (document.getElementById(styleId)) return;
-
-    const style = document.createElement('style');
-    style.id = styleId;
-    style.textContent = FLOATING_STYLES;
-    document.head.appendChild(style);
   }
 
   /**
@@ -435,7 +277,7 @@ export function createFloatingButton(options: FloatingButtonOptions): FloatingBu
     mount(): void {
       if (mounted) return;
 
-      injectStyles();
+      // CSS is loaded via manifest.json content_scripts for Trusted Types compliance
 
       const playerContainer = findPlayerContainer();
       if (!playerContainer) {

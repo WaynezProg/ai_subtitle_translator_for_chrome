@@ -1,0 +1,113 @@
+/**
+ * Error Display / Toast Styles
+ * AI Subtitle Translator - Trusted Types compliant
+ */
+
+#ai-subtitle-toast-container {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 2147483647;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 8px;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+.ai-subtitle-toast {
+  background: #323232;
+  color: #fff;
+  padding: 12px 16px;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 280px;
+  max-width: 400px;
+  animation: ai-subtitle-toastSlideIn 0.3s ease-out;
+}
+
+@keyframes ai-subtitle-toastSlideIn {
+  from {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.ai-subtitle-toast.removing {
+  animation: ai-subtitle-toastSlideOut 0.2s ease-in forwards;
+}
+
+@keyframes ai-subtitle-toastSlideOut {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+}
+
+.ai-subtitle-toast.error {
+  background: #d32f2f;
+}
+
+.ai-subtitle-toast.warning {
+  background: #f57c00;
+}
+
+.ai-subtitle-toast.success {
+  background: #388e3c;
+}
+
+.ai-subtitle-toast.info {
+  background: #1976d2;
+}
+
+.ai-subtitle-toast .toast-icon {
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.ai-subtitle-toast .toast-content {
+  flex: 1;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.ai-subtitle-toast .toast-action {
+  background: rgba(255, 255, 255, 0.2);
+  border: none;
+  color: #fff;
+  padding: 6px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background 0.2s ease;
+}
+
+.ai-subtitle-toast .toast-action:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.ai-subtitle-toast .toast-close {
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.7);
+  cursor: pointer;
+  padding: 4px;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.ai-subtitle-toast .toast-close:hover {
+  color: #fff;
+}

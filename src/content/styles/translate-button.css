@@ -1,0 +1,92 @@
+/**
+ * Translate Button Styles
+ * AI Subtitle Translator - Trusted Types compliant
+ */
+
+.ai-subtitle-btn-container {
+  display: inline-flex;
+  align-items: center;
+  position: relative;
+  margin-left: 8px;
+}
+
+#ai-subtitle-translate-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  border-radius: 4px;
+  position: relative;
+  width: 36px;
+  height: 36px;
+  color: #fff;
+}
+
+#ai-subtitle-translate-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+#ai-subtitle-translate-btn:active {
+  transform: scale(0.95);
+}
+
+#ai-subtitle-translate-btn .btn-icon {
+  font-size: 20px;
+  line-height: 1;
+}
+
+#ai-subtitle-translate-btn .btn-progress {
+  position: absolute;
+  bottom: 2px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 24px;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+#ai-subtitle-translate-btn .btn-progress-bar {
+  height: 100%;
+  background: #4CAF50;
+  transition: width 0.3s ease;
+  border-radius: 2px;
+}
+
+#ai-subtitle-translate-btn[data-state="translating"] {
+  animation: ai-subtitle-pulse 1.5s infinite;
+}
+
+#ai-subtitle-translate-btn[data-state="error"] {
+  color: #ff4444;
+}
+
+#ai-subtitle-translate-btn[data-state="complete"],
+#ai-subtitle-translate-btn[data-state="cached"] {
+  color: #4CAF50;
+}
+
+#ai-subtitle-translate-btn[data-state="local"] {
+  color: #9C27B0;
+}
+
+#ai-subtitle-translate-btn .local-indicator {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 8px;
+  height: 8px;
+  background: #9C27B0;
+  border-radius: 50%;
+  border: 1px solid #fff;
+}
+
+@keyframes ai-subtitle-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}

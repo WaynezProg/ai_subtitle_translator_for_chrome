@@ -45,7 +45,8 @@ module.exports = {
         { from: 'src/popup/styles.css', to: 'popup.css', noErrorOnMissing: true },
         { from: 'src/options/index.html', to: 'options.html' },
         { from: 'src/options/styles.css', to: 'options.css' },
-        { from: 'src/icons', to: 'icons' }
+        { from: 'src/icons', to: 'icons' },
+        { from: 'src/content/styles', to: 'styles' }
       ]
     })
   ],

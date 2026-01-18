@@ -20,9 +20,11 @@ import {
   cancelTranslation,
   getCachedTranslation,
   getAuthStatus,
+  translateText,
   addMessageListener,
   setupMessageListener,
 } from './message-sender';
+import { createRealtimeTranslator, RealtimeTranslator, TranslatedCue } from './realtime-translator';
 import type { TranslationProgressMessage, TranslationCompleteMessage, TranslationErrorMessage, TranslationChunkCompleteMessage } from '../shared/types/messages';
 import type { Platform, Cue, SubtitleFormat } from '../shared/types/subtitle';
 // JobProgress type available for future use if needed
@@ -31,8 +33,7 @@ import { parseWebVTT } from '../shared/parsers/webvtt-parser';
 import { parseTTML } from '../shared/parsers/ttml-parser';
 import { parseJSON3 } from '../shared/parsers/json3-parser';
 import { createSubtitleRenderer, SubtitleRenderer } from './subtitle-renderer';
-import { getUserSettings } from '../shared/utils/preferences';
-import { getNetworkStatus, onNetworkStatusChange, getProviderSuggestion } from '../shared/utils/network-status';
+import { getPreferencesFromBridge, getAuthConfigFromBridge } from './storage-bridge';
 
 // ============================================================================
 // State
@@ -44,9 +45,11 @@ let translateButton: TranslateButton | null = null;
 let floatingButton: FloatingButton | null = null;
 let progressOverlay: ProgressOverlay | null = null;
 let subtitleRenderer: SubtitleRenderer | null = null;
+let realtimeTranslator: RealtimeTranslator | null = null;
 let currentJobId: string | null = null;
 let translatedCues: Cue[] = [];
 let initialized = false;
+const realtimeMode = true;  // Default to real-time mode
 
 // ============================================================================
 // Initialization
@@ -86,54 +89,92 @@ async function initialize(): Promise<void> {
     return;
   }
   
-  // Setup message listener for background messages
-  setupMessageListener();
-  setupBackgroundMessageHandlers();
-  
-  // Create UI components
+  // Create UI components first (don't block on messaging)
   createUIComponents();
   
-  // Check for cached translation
-  await checkForCachedTranslation();
+  // Setup message listener for background messages (may fail in MAIN world)
+  try {
+    setupMessageListener();
+    setupBackgroundMessageHandlers();
+  } catch (err) {
+    console.warn('[Content] Message listener setup failed (expected in MAIN world):', err);
+  }
   
-  // Setup network status monitoring
-  setupNetworkStatusMonitoring();
+  // Check for cached translation (non-blocking, may fail without chrome.runtime)
+  checkForCachedTranslation().catch(err => {
+    console.warn('[Content] Cache check failed:', err);
+  });
+  
+  // Setup network status monitoring (may fail without chrome.runtime)
+  try {
+    setupNetworkStatusMonitoring();
+  } catch (err) {
+    console.warn('[Content] Network status monitoring failed:', err);
+  }
   
   // Setup subtitle visibility listener
   setupSubtitleVisibilityListener();
+  
+  // Setup keyboard shortcuts for time offset adjustment
+  setupTimeOffsetKeyboardShortcuts();
   
   initialized = true;
   console.log('[Content] Content script fully initialized');
 }
 
 /**
- * Setup network status monitoring
+ * Setup network status monitoring (simplified for MAIN world)
  */
 function setupNetworkStatusMonitoring(): void {
   // Check initial status
   void updateLocalModeIndicator();
   
   // Listen for network changes
-  onNetworkStatusChange((status) => {
-    console.log('[Content] Network status changed:', status);
-    
-    if (!status.isOnline && status.ollamaAvailable) {
-      showInfoToast('已切換至本地 Ollama 模型');
-      translateButton?.setLocalMode(true);
-    } else if (!status.isOnline && !status.ollamaAvailable) {
-      showInfoToast('目前處於離線狀態，無法翻譯');
-    } else {
-      void updateLocalModeIndicator();
-    }
+  window.addEventListener('online', () => {
+    console.log('[Content] Network status: online');
+    void updateLocalModeIndicator();
   });
+  
+  window.addEventListener('offline', () => {
+    console.log('[Content] Network status: offline');
+    showInfoToast('目前處於離線狀態');
+    // Check if Ollama is available
+    void checkOllamaFallback();
+  });
+}
+
+/**
+ * Check if Ollama is available as fallback
+ */
+async function checkOllamaFallback(): Promise<void> {
+  try {
+    const config = await getAuthConfigFromBridge();
+    if (config.selectedProvider === 'ollama' || config.providers['ollama']) {
+      // Try to reach Ollama
+      const response = await fetch('http://localhost:11434/api/tags', {
+        method: 'GET',
+      }).catch(() => null);
+      
+      if (response?.ok) {
+        showInfoToast('已切換至本地 Ollama 模型');
+        translateButton?.setLocalMode(true);
+      }
+    }
+  } catch {
+    // Ignore errors
+  }
 }
 
 /**
  * Update local mode indicator based on current provider
  */
 async function updateLocalModeIndicator(): Promise<void> {
-  const suggestion = await getProviderSuggestion();
-  translateButton?.setLocalMode(suggestion.useOllama);
+  try {
+    const config = await getAuthConfigFromBridge();
+    translateButton?.setLocalMode(config.selectedProvider === 'ollama');
+  } catch {
+    // Ignore errors
+  }
 }
 
 /**
@@ -255,15 +296,14 @@ async function handleTranslateClick(): Promise<void> {
     return;
   }
   
-  // Check network status first
-  const networkStatus = await getNetworkStatus();
-  if (!networkStatus.isOnline && !networkStatus.ollamaAvailable) {
-    showInfoToast('目前處於離線狀態。請連接網路或設定 Ollama 本地模型。');
-    return;
-  }
-  
-  // If offline but Ollama is available, show indicator
-  if (!networkStatus.isOnline && networkStatus.ollamaAvailable) {
+  // Check network status first (simplified for MAIN world)
+  if (!navigator.onLine) {
+    // Check if Ollama might be available
+    const config = await getAuthConfigFromBridge();
+    if (config.selectedProvider !== 'ollama') {
+      showInfoToast('目前處於離線狀態。請連接網路或設定 Ollama 本地模型。');
+      return;
+    }
     translateButton?.setLocalMode(true);
     showInfoToast('使用本地 Ollama 模型進行翻譯');
   }
@@ -275,7 +315,20 @@ async function handleTranslateClick(): Promise<void> {
     return;
   }
   
-  // Get subtitle tracks
+  // Get user settings
+  const preferences = await getPreferencesFromBridge();
+  
+  console.log('[Content] Translation mode:', { realtimeMode });
+  
+  // If real-time mode, start the real-time translator
+  if (realtimeMode) {
+    await startRealtimeTranslation(preferences.defaultTargetLanguage);
+    return;
+  }
+  
+  console.log('[Content] Using batch mode (realtimeMode is false)');
+  
+  // Batch mode: Get subtitle tracks
   const tracks = await currentAdapter.getSubtitleTracks();
   if (tracks.length === 0) {
     showInfoToast('此影片沒有可用的字幕');
@@ -294,14 +347,18 @@ async function handleTranslateClick(): Promise<void> {
     // Fetch subtitle content
     const rawSubtitle = await currentAdapter.fetchSubtitle(track);
     
+    // Debug: Log fetched content
+    console.log('[Content] Fetched subtitle:', {
+      format: rawSubtitle.format,
+      contentLength: rawSubtitle.content.length,
+      contentPreview: rawSubtitle.content.substring(0, 200),
+    });
+    
     // Parse subtitle
     const cues = parseSubtitle(rawSubtitle.content, rawSubtitle.format);
     if (cues.length === 0) {
       throw new Error('無法解析字幕內容');
     }
-    
-    // Get user settings
-    const settings = await getUserSettings();
     
     // Notify background about subtitle
     const videoId = currentAdapter.getVideoId();
@@ -317,10 +374,14 @@ async function handleTranslateClick(): Promise<void> {
       format: track.format,
     });
     
-    // Request translation
+    // Request translation with full subtitle data
     const result = await requestTranslation({
       subtitleId: `${videoId}:${track.language}`,
-      targetLanguage: settings.targetLanguage,
+      videoId,
+      platform: currentPlatform!,
+      sourceLanguage: track.language,
+      targetLanguage: preferences.defaultTargetLanguage,
+      cues,
     });
     
     currentJobId = result.jobId;
@@ -333,6 +394,254 @@ async function handleTranslateClick(): Promise<void> {
     progressOverlay?.hide();
     showErrorToast('API_ERROR', error instanceof Error ? error.message : '翻譯失敗');
   }
+}
+
+// Store for pre-translated cues
+const preTranslatedCuesMap: Map<string, string> = new Map();  // text -> translation lookup
+let preTranslatedCuesWithTiming: TranslatedCue[] = [];        // Cues with timing for time-sync mode
+let isPreTranslating = false;
+
+/**
+ * Start real-time subtitle translation
+ */
+async function startRealtimeTranslation(targetLanguage: string): Promise<void> {
+  console.log('[Content] startRealtimeTranslation called:', { targetLanguage });
+  
+  // If already translating in real-time, stop it
+  if (realtimeTranslator?.getState() === 'active') {
+    console.log('[Content] Stopping real-time translation');
+    realtimeTranslator.stop();
+    translateButton?.setState('idle');
+    floatingButton?.setState('idle');
+    preTranslatedCuesMap.clear();
+    preTranslatedCuesWithTiming = [];
+    showInfoToast('即時翻譯已停止');
+    return;
+  }
+  
+  // Get source language from current track
+  showInfoToast('正在偵測字幕...');
+  const tracks = await currentAdapter!.getSubtitleTracks();
+  const track = tracks[0];
+  if (!track) {
+    // Platform-specific message
+    if (currentPlatform === 'netflix') {
+      showInfoToast('請先在 Netflix 播放器中開啟字幕，然後再點擊翻譯');
+    } else {
+      showInfoToast('此影片沒有可用的字幕');
+    }
+    return;
+  }
+  
+  const sourceLanguage = track.language || 'auto';
+  
+  console.log('[Content] Starting real-time translation:', { sourceLanguage, targetLanguage });
+  
+  // Update UI - no blocking overlay, just button state
+  translateButton?.setState('translating');
+  floatingButton?.setState('translating');
+  showInfoToast('開始翻譯字幕...');
+  
+  try {
+    if (!currentAdapter) {
+      throw new Error('Adapter not initialized');
+    }
+    
+    // First, fetch and parse subtitles to get the cues
+    const rawSubtitle = await currentAdapter.fetchSubtitle(track as Parameters<typeof currentAdapter.fetchSubtitle>[0]);
+    const actualSourceLanguage = (rawSubtitle.metadata?.language as string | undefined) || sourceLanguage;
+    
+    if (actualSourceLanguage !== sourceLanguage) {
+      console.log(`[Content] Using fallback source language: ${actualSourceLanguage} (requested: ${sourceLanguage})`);
+    }
+    
+    const cues = parseSubtitle(rawSubtitle.content, rawSubtitle.format);
+    if (cues.length === 0) {
+      throw new Error('無法解析字幕內容');
+    }
+    
+    console.log(`[Content] Found ${cues.length} cues to translate`);
+    
+    // Initialize preTranslatedCuesWithTiming with original cues (translations will be filled in progressively)
+    preTranslatedCuesWithTiming = cues.map(cue => ({
+      startTime: cue.startTime,
+      endTime: cue.endTime,
+      originalText: cue.text,
+      translatedText: cue.text,  // Initially same as original, will be replaced
+    }));
+    
+    // Create and start real-time translator immediately with original cues
+    // It will use whatever translations are available
+    console.log('[Content] Starting realtime translator with', preTranslatedCuesWithTiming.length, 'cues');
+    
+    realtimeTranslator = createRealtimeTranslator({
+      platform: currentPlatform!,
+      targetLanguage,
+      showOriginal: true,
+      translatedCues: preTranslatedCuesWithTiming,  // Will be updated as translations complete
+      onTranslationRequest: async (text: string): Promise<string> => {
+        // Look up in pre-translated cache first
+        const cached = findBestMatch(text, preTranslatedCuesMap);
+        if (cached) {
+          return cached;
+        }
+        
+        // Fallback to real-time translation for new text
+        try {
+          const result = await translateText({
+            text,
+            sourceLanguage: actualSourceLanguage,
+            targetLanguage,
+          });
+          return result.translatedText;
+        } catch (error) {
+          console.error('[Content] Real-time translation error:', error);
+          return text;
+        }
+      },
+    });
+    
+    // Start showing subtitles immediately (with original text until translations are ready)
+    realtimeTranslator.start();
+    
+    // Now translate in background - don't block the UI
+    void translateInBackground(cues, actualSourceLanguage, targetLanguage);
+    
+  } catch (error) {
+    console.error('[Content] Translation setup failed:', error);
+    translateButton?.setState('error');
+    floatingButton?.setState('error');
+    showErrorToast('API_ERROR', error instanceof Error ? error.message : '翻譯準備失敗');
+  }
+}
+
+/**
+ * Translate subtitles in background without blocking UI
+ */
+async function translateInBackground(
+  cues: Cue[],
+  sourceLanguage: string,
+  targetLanguage: string
+): Promise<void> {
+  if (isPreTranslating) return;
+  isPreTranslating = true;
+  
+  // Clear previous translations
+  preTranslatedCuesMap.clear();
+  
+  try {
+    // Group cues into batches for efficient translation
+    const batchSize = 10;
+    interface CueBatch {
+      cueIndices: number[];
+      texts: string[];
+    }
+    const batches: CueBatch[] = [];
+    
+    for (let i = 0; i < cues.length; i += batchSize) {
+      const batchCues = cues.slice(i, i + batchSize);
+      batches.push({
+        cueIndices: batchCues.map((_, idx) => i + idx),
+        texts: batchCues.map(c => c.text),
+      });
+    }
+    
+    console.log(`[Content] Translating ${batches.length} batches in background...`);
+    
+    // Translate batches
+    let translatedCount = 0;
+    for (const batch of batches) {
+      // Check if translator was stopped
+      if (!realtimeTranslator || realtimeTranslator.getState() !== 'active') {
+        console.log('[Content] Translator stopped, aborting background translation');
+        break;
+      }
+      
+      const batchText = batch.texts.join('\n---\n');
+      
+      try {
+        const result = await translateText({
+          text: batchText,
+          sourceLanguage,
+          targetLanguage,
+        });
+        
+        // Parse batch result back into individual translations
+        const translations = result.translatedText.split(/\n---\n|\n-{3,}\n/);
+        
+        for (let i = 0; i < batch.texts.length; i++) {
+          const cueIndex = batch.cueIndices[i];
+          const original = batch.texts[i].trim();
+          const translated = (translations[i] || original).trim();
+          
+          if (original && translated) {
+            // Store in map for lookup
+            preTranslatedCuesMap.set(original, translated);
+            
+            // Update the timing cue with translation (realtime translator will pick this up)
+            if (cueIndex < preTranslatedCuesWithTiming.length) {
+              preTranslatedCuesWithTiming[cueIndex].translatedText = translated;
+            }
+          }
+        }
+        
+        translatedCount += batch.texts.length;
+        const progress = Math.round((translatedCount / cues.length) * 100);
+        
+        // Update button progress instead of overlay
+        translateButton?.setProgress(progress);
+        floatingButton?.setProgress(progress);
+        
+        console.log(`[Content] Background translation progress: ${progress}%`);
+        
+      } catch (error) {
+        console.error('[Content] Batch translation error:', error);
+        // Continue with next batch
+      }
+    }
+    
+    console.log(`[Content] Background translation complete. Cached ${preTranslatedCuesMap.size} translations`);
+    
+    // Update button state
+    translateButton?.setState('complete');
+    floatingButton?.setState('complete');
+    showSuccessToast(`翻譯完成！共 ${translatedCount} 句`);
+    
+  } finally {
+    isPreTranslating = false;
+  }
+}
+
+/**
+ * Find best matching translation from cache
+ */
+function findBestMatch(text: string, cache: Map<string, string>): string | null {
+  const normalizedText = text.trim();
+  
+  // Exact match
+  if (cache.has(normalizedText)) {
+    return cache.get(normalizedText)!;
+  }
+  
+  // Try to find partial matches (for ASR subtitles that build up incrementally)
+  for (const [original, translated] of cache) {
+    // If the cache entry contains this text
+    if (original.includes(normalizedText) && normalizedText.length > 5) {
+      // Extract the corresponding part of the translation
+      const startIdx = original.indexOf(normalizedText);
+      const ratio = startIdx / original.length;
+      const translatedStart = Math.floor(ratio * translated.length);
+      const translatedLength = Math.floor((normalizedText.length / original.length) * translated.length);
+      return translated.substring(translatedStart, translatedStart + translatedLength) || translated;
+    }
+    
+    // If this text contains the cache entry
+    if (normalizedText.includes(original) && original.length > 5) {
+      return translated;
+    }
+  }
+  
+  return null;
 }
 
 /**
@@ -464,13 +773,13 @@ async function checkForCachedTranslation(): Promise<void> {
   if (tracks.length === 0) return;
   
   const track = tracks[0];
-  const settings = await getUserSettings();
+  const preferences = await getPreferencesFromBridge();
   
   try {
     const cached = await getCachedTranslation({
       videoId,
       sourceLanguage: track.language,
-      targetLanguage: settings.targetLanguage,
+      targetLanguage: preferences.defaultTargetLanguage,
     });
     
     if (cached.found && cached.subtitle) {
@@ -535,6 +844,19 @@ function setSubtitleVisibility(visible: boolean): void {
  * Handle SPA navigation
  */
 function handleNavigation(): void {
+  console.log('[Content] Navigation detected, cleaning up...');
+  
+  // Stop realtime translator first
+  if (realtimeTranslator?.getState() === 'active') {
+    realtimeTranslator.stop();
+    realtimeTranslator = null;
+  }
+  
+  // Clear pre-translated cues
+  preTranslatedCuesMap.clear();
+  preTranslatedCuesWithTiming = [];
+  isPreTranslating = false;
+  
   // Reset state
   currentJobId = null;
   translatedCues = [];
@@ -566,6 +888,66 @@ const urlObserver = new MutationObserver(() => {
 
 // Also handle popstate for back/forward navigation
 window.addEventListener('popstate', handleNavigation);
+
+// ============================================================================
+// Subtitle Time Offset Adjustment
+// ============================================================================
+
+/**
+ * Setup keyboard shortcuts for subtitle time offset adjustment
+ * - Shift + Left Arrow: Delay subtitles by 500ms (subtitles appear later)
+ * - Shift + Right Arrow: Advance subtitles by 500ms (subtitles appear earlier)
+ * - Shift + 0: Reset offset to 0
+ */
+function setupTimeOffsetKeyboardShortcuts(): void {
+  const OFFSET_STEP = 500; // 500ms per keypress
+  
+  document.addEventListener('keydown', (event) => {
+    // Only handle when Shift is pressed and translator is active
+    if (!event.shiftKey || !realtimeTranslator || realtimeTranslator.getState() !== 'active') {
+      return;
+    }
+    
+    // Don't interfere with input fields
+    const target = event.target as HTMLElement;
+    if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
+      return;
+    }
+    
+    let handled = false;
+    
+    switch (event.key) {
+      case 'ArrowLeft':
+        // Delay subtitles (they appear later)
+        realtimeTranslator.setTimeOffset(realtimeTranslator.getTimeOffset() + OFFSET_STEP);
+        showInfoToast(`字幕延遲 ${realtimeTranslator.getTimeOffset()}ms`);
+        handled = true;
+        break;
+        
+      case 'ArrowRight':
+        // Advance subtitles (they appear earlier)
+        realtimeTranslator.setTimeOffset(realtimeTranslator.getTimeOffset() - OFFSET_STEP);
+        showInfoToast(`字幕提前 ${-realtimeTranslator.getTimeOffset()}ms`);
+        handled = true;
+        break;
+        
+      case '0':
+      case 'Numpad0':
+        // Reset offset
+        realtimeTranslator.setTimeOffset(0);
+        showInfoToast('字幕時間已重置');
+        handled = true;
+        break;
+    }
+    
+    if (handled) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  });
+  
+  console.log('[Content] Time offset keyboard shortcuts enabled (Shift + Arrow keys)');
+}
 
 // ============================================================================
 // Start

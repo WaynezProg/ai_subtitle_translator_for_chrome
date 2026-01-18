@@ -178,21 +178,30 @@ export function createSubtitleRenderer(): SubtitleRenderer {
   }
   
   /**
+   * Clear all children from a container (Trusted Types compliant)
+   */
+  function clearChildren(element: HTMLElement): void {
+    while (element.firstChild) {
+      element.removeChild(element.firstChild);
+    }
+  }
+
+  /**
    * Render a cue to the container
-   * 
+   *
    * Cue structure:
    * - cue.text: Original text
    * - cue.translatedText: Translated text (optional)
-   * 
+   *
    * In bilingual mode, we show both original and translated.
    * In single mode, we show translatedText if available, otherwise original text.
    */
   function renderCue(cue: Cue | null): void {
     if (!container) return;
-    
-    // Clear existing content
-    container.innerHTML = '';
-    
+
+    // Clear existing content (Trusted Types compliant - no innerHTML)
+    clearChildren(container);
+
     if (!cue) {
       return;
     }

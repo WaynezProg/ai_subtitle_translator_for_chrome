@@ -18,6 +18,8 @@ import type {
   GetCachedTranslationResponse,
   GetAuthStatusMessage,
   GetAuthStatusResponse,
+  TranslateTextMessage,
+  TranslateTextResponse,
   Response,
   BackgroundToContentMessage,
 } from '../shared/types/messages';
@@ -43,6 +45,7 @@ interface MessageHandlers {
   CANCEL_TRANSLATION: HandlerFunction<CancelTranslationMessage, CancelTranslationResponse>;
   GET_CACHED_TRANSLATION: HandlerFunction<GetCachedTranslationMessage, GetCachedTranslationResponse>;
   GET_AUTH_STATUS: HandlerFunction<GetAuthStatusMessage, GetAuthStatusResponse>;
+  TRANSLATE_TEXT: HandlerFunction<TranslateTextMessage, TranslateTextResponse>;
 }
 
 // ============================================================================

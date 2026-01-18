@@ -543,33 +543,47 @@ export class DisneyAdapter implements PlatformAdapter {
     );
     
     if (activeCues.length === 0) {
-      this.subtitleOverlay.innerHTML = '';
+      this.clearOverlay();
       return;
     }
-    
-    // Display cues
-    const html = activeCues.map(cue => {
-      if (cue.translatedText) {
-        return `
-          <span class="subtitle-text bilingual">
-            <span class="translated">${this.escapeHtml(cue.translatedText)}</span>
-            <span class="original">${this.escapeHtml(cue.text)}</span>
-          </span>
-        `;
+
+    // Clear and rebuild using DOM APIs (Trusted Types compliant)
+    this.clearOverlay();
+
+    activeCues.forEach((cue, index) => {
+      if (index > 0) {
+        this.subtitleOverlay!.appendChild(document.createElement('br'));
       }
-      return `<span class="subtitle-text">${this.escapeHtml(cue.text)}</span>`;
-    }).join('<br>');
-    
-    this.subtitleOverlay.innerHTML = html;
+
+      const span = document.createElement('span');
+      span.className = cue.translatedText ? 'subtitle-text bilingual' : 'subtitle-text';
+
+      if (cue.translatedText) {
+        const translatedSpan = document.createElement('span');
+        translatedSpan.className = 'translated';
+        translatedSpan.textContent = cue.translatedText;
+        span.appendChild(translatedSpan);
+
+        const originalSpan = document.createElement('span');
+        originalSpan.className = 'original';
+        originalSpan.textContent = cue.text;
+        span.appendChild(originalSpan);
+      } else {
+        span.textContent = cue.text;
+      }
+
+      this.subtitleOverlay!.appendChild(span);
+    });
   }
-  
+
   /**
-   * Escape HTML entities
+   * Clear overlay content (Trusted Types compliant)
    */
-  private escapeHtml(text: string): string {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+  private clearOverlay(): void {
+    if (!this.subtitleOverlay) return;
+    while (this.subtitleOverlay.firstChild) {
+      this.subtitleOverlay.removeChild(this.subtitleOverlay.firstChild);
+    }
   }
 }
 

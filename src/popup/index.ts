@@ -145,7 +145,8 @@ function getProviderDisplayName(type: string): string {
     'chatgpt-subscription': 'ChatGPT Plus',
     'claude-api': 'Claude API',
     'openai-api': 'OpenAI API',
-    'ollama': 'Ollama'
+    'ollama': 'Ollama',
+    'google-translate': 'Google 翻譯'
   };
   return displayNames[type] ?? type;
 }

@@ -59,7 +59,11 @@ export interface SubtitleDetectedResponse extends Response<{
  */
 export interface RequestTranslationMessage extends Message<'REQUEST_TRANSLATION', {
   subtitleId: string;
+  videoId: string;
+  platform: Platform;
+  sourceLanguage: string;
   targetLanguage: string;
+  cues: Cue[];
   startFromIndex?: number;
 }> {}
 
@@ -103,6 +107,20 @@ export interface GetAuthStatusResponse extends Response<{
   configured: boolean;
   provider?: ProviderType;
   status?: ProviderStatus;
+}> {}
+
+/**
+ * TRANSLATE_TEXT: Request to translate a single text (for real-time translation)
+ */
+export interface TranslateTextMessage extends Message<'TRANSLATE_TEXT', {
+  text: string;
+  sourceLanguage: string;
+  targetLanguage: string;
+}> {}
+
+export interface TranslateTextResponse extends Response<{
+  translatedText: string;
+  cached: boolean;
 }> {}
 
 // ============================================================================
@@ -168,7 +186,8 @@ export type ContentToBackgroundMessage =
   | RequestTranslationMessage
   | CancelTranslationMessage
   | GetCachedTranslationMessage
-  | GetAuthStatusMessage;
+  | GetAuthStatusMessage
+  | TranslateTextMessage;
 
 /**
  * All background to content script messages

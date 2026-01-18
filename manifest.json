@@ -43,6 +43,12 @@
         "*://*.amazon.com/gp/video/*"
       ],
       "js": ["bridge.js"],
+      "css": [
+        "styles/floating-button.css",
+        "styles/translate-button.css",
+        "styles/error-display.css",
+        "styles/progress-overlay.css"
+      ],
       "run_at": "document_start"
     }
   ],
