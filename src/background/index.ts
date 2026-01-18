@@ -209,24 +209,34 @@ messageHandler.on('CANCEL_TRANSLATION', async (message: CancelTranslationMessage
 messageHandler.on('GET_CACHED_TRANSLATION', async (message: GetCachedTranslationMessage, _sender) => {
   const { videoId, sourceLanguage, targetLanguage } = message.payload;
   
+  // Get user preferences to determine provider
+  // Use 'google-translate' as default to match SAVE_TRANSLATION handler
+  const settings = await getUserSettings();
+  const providerType = settings.selectedProvider || 'google-translate';
+  
   console.log('[Background] Cache lookup:', {
     videoId,
     sourceLanguage,
     targetLanguage,
+    providerType,
+    model: 'default',
   });
   
   try {
-    // Get user preferences to determine provider
-    const settings = await getUserSettings();
-    const providerType = settings.selectedProvider || 'claude-subscription';
-    
-    // Check cache
+    // Check cache - use 'default' model to match the key used when saving
     const cacheResult = await translationService.checkCache(
       videoId,
       sourceLanguage,
       targetLanguage,
-      providerType
+      providerType,
+      'default'
     );
+    
+    console.log('[Background] Cache result:', {
+      hit: cacheResult.hit,
+      source: cacheResult.source,
+      hasCues: !!cacheResult.subtitle?.cues?.length,
+    });
     
     if (cacheResult.hit && cacheResult.subtitle) {
       console.log(`[Background] Cache hit (${cacheResult.source}) for ${videoId}`);
@@ -400,19 +410,21 @@ messageHandler.on('TRANSLATE_TEXT', async (message: TranslateTextMessage, _sende
 messageHandler.on('SAVE_TRANSLATION', async (message: SaveTranslationMessage, _sender) => {
   const { videoId, platform, sourceLanguage, targetLanguage, subtitle } = message.payload;
   
+  // Get user settings to determine provider
+  const settings = await getUserSettings();
+  const providerType = settings.selectedProvider || 'google-translate';
+  
   console.log('[Background] Save translation requested:', {
     videoId,
     platform,
     sourceLanguage,
     targetLanguage,
+    providerType,
+    model: 'default',
     cueCount: subtitle.cues.length,
   });
   
   try {
-    // Get user settings to determine provider
-    const settings = await getUserSettings();
-    const providerType = settings.selectedProvider || 'google-translate';
-    
     // Save to cache
     await translationService.saveToCache(
       videoId,
@@ -423,7 +435,7 @@ messageHandler.on('SAVE_TRANSLATION', async (message: SaveTranslationMessage, _s
       subtitle
     );
     
-    console.log('[Background] Translation saved to cache');
+    console.log('[Background] Translation saved to cache successfully');
     return successResponse({ saved: true });
   } catch (error) {
     console.error('[Background] Failed to save translation:', error);

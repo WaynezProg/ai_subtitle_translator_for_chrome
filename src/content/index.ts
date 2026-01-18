@@ -102,14 +102,16 @@ async function initialize(): Promise<void> {
   }
   
   // Check for cached translation (non-blocking, may fail without chrome.runtime)
-  checkForCachedTranslation().catch(err => {
-    // Silently ignore extension context invalidation errors
-    const errorMessage = err instanceof Error ? err.message : String(err);
-    if (!errorMessage.includes('Extension context') && 
-        !errorMessage.includes('EXTENSION_RELOADED')) {
-      console.warn('[Content] Cache check failed:', err);
-    }
-  });
+  console.log('[Content] Calling checkForCachedTranslation...');
+  checkForCachedTranslation()
+    .then(() => {
+      console.log('[Content] checkForCachedTranslation completed');
+    })
+    .catch(err => {
+      // Log all errors for debugging
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      console.warn('[Content] Cache check failed:', errorMessage);
+    });
   
   // Setup network status monitoring (may fail without chrome.runtime)
   try {
@@ -474,9 +476,10 @@ async function startRealtimeTranslation(targetLanguage: string): Promise<void> {
     
     if (videoId) {
       try {
+        // Use track.language (sourceLanguage) for cache lookup to match how we save
         const cached = await getCachedTranslation({
           videoId,
-          sourceLanguage: actualSourceLanguage,
+          sourceLanguage: sourceLanguage,  // Use track.language, not actualSourceLanguage
           targetLanguage,
         });
         
@@ -557,7 +560,8 @@ async function startRealtimeTranslation(targetLanguage: string): Promise<void> {
     }
     
     // Otherwise, translate in background - don't block the UI
-    void translateInBackground(cues, actualSourceLanguage, targetLanguage);
+    // Pass trackLanguage for cache key consistency with checkForCachedTranslation
+    void translateInBackground(cues, actualSourceLanguage, targetLanguage, sourceLanguage);
     
   } catch (error) {
     console.error('[Content] Translation setup failed:', error);
@@ -569,11 +573,16 @@ async function startRealtimeTranslation(targetLanguage: string): Promise<void> {
 
 /**
  * Translate subtitles in background without blocking UI
+ * @param cues - The cues to translate
+ * @param sourceLanguage - The actual source language of the content
+ * @param targetLanguage - The target language for translation
+ * @param cacheKeyLanguage - The language to use for cache key (defaults to sourceLanguage)
  */
 async function translateInBackground(
   cues: Cue[],
   sourceLanguage: string,
-  targetLanguage: string
+  targetLanguage: string,
+  cacheKeyLanguage?: string
 ): Promise<void> {
   if (isPreTranslating) return;
   isPreTranslating = true;
@@ -660,19 +669,28 @@ async function translateInBackground(
     showSuccessToast(`翻譯完成！共 ${translatedCount} 句`);
     
     // Save to persistent cache for page refresh
+    // Use cacheKeyLanguage (track.language) for consistency with checkForCachedTranslation
     const videoId = currentAdapter?.getVideoId();
+    const cacheSourceLang = cacheKeyLanguage || sourceLanguage;
+    console.log('[Content] Saving translation with cache key:', {
+      videoId,
+      cacheSourceLang,
+      cacheKeyLanguage,
+      sourceLanguage,
+      targetLanguage,
+    });
     if (videoId && currentPlatform) {
       try {
         await saveTranslation({
           videoId,
           platform: currentPlatform,
-          sourceLanguage,
+          sourceLanguage: cacheSourceLang,
           targetLanguage,
           subtitle: {
-            id: `${videoId}:${sourceLanguage}:${targetLanguage}`,
+            id: `${videoId}:${cacheSourceLang}:${targetLanguage}`,
             videoId,
             platform: currentPlatform,
-            sourceLanguage,
+            sourceLanguage: cacheSourceLang,
             targetLanguage,
             format: 'webvtt',
             cues: preTranslatedCuesWithTiming.map((cue, idx) => ({
@@ -850,19 +868,108 @@ function parseSubtitle(content: string, format: SubtitleFormat): Cue[] {
 }
 
 /**
- * Check for cached translation
+ * Auto-load cached translation and start displaying subtitles
+ * @param cachedCues - The cached cues to load
+ * @param targetLanguage - The target language for translation
+ * @returns true if auto-load succeeded, false otherwise
+ */
+async function autoLoadCachedTranslation(
+  cachedCues: Array<{ startTime: number; endTime: number; text: string; translatedText?: string }>,
+  targetLanguage: string
+): Promise<boolean> {
+  if (!currentAdapter || !currentPlatform) {
+    console.warn('[Content] Cannot auto-load: adapter or platform not initialized');
+    return false;
+  }
+  
+  const video = currentAdapter.getVideoElement();
+  if (!video) {
+    console.warn('[Content] Cannot auto-load: video element not found');
+    return false;
+  }
+  
+  try {
+    // Prepare translated cues for realtime translator
+    preTranslatedCuesWithTiming = cachedCues.map(cue => ({
+      startTime: cue.startTime,
+      endTime: cue.endTime,
+      originalText: cue.text,
+      translatedText: cue.translatedText || cue.text,
+    }));
+    
+    // Also populate the lookup map for fallback
+    for (const cue of cachedCues) {
+      if (cue.text && cue.translatedText) {
+        preTranslatedCuesMap.set(cue.text, cue.translatedText);
+      }
+    }
+    
+    console.log(`[Content] Auto-loading ${preTranslatedCuesWithTiming.length} cached cues`);
+    
+    // Create and start realtime translator with cached cues
+    realtimeTranslator = createRealtimeTranslator({
+      platform: currentPlatform,
+      targetLanguage,
+      showOriginal: true,
+      translatedCues: preTranslatedCuesWithTiming,
+      onTranslationRequest: async (text: string): Promise<string> => {
+        // Look up in pre-translated cache first
+        const cached = findBestMatch(text, preTranslatedCuesMap);
+        if (cached) {
+          return cached;
+        }
+        // Return original if not found (shouldn't happen for cached translations)
+        return text;
+      },
+    });
+    
+    realtimeTranslator.start();
+    
+    // Update UI state to complete
+    translateButton?.setState('complete');
+    floatingButton?.setState('complete');
+    
+    showSuccessToast(`已自動載入翻譯 (${cachedCues.length} 句)`);
+    console.log('[Content] Auto-load cached translation complete');
+    
+    return true;
+  } catch (error) {
+    console.error('[Content] Auto-load cached translation failed:', error);
+    return false;
+  }
+}
+
+/**
+ * Check for cached translation and auto-load if found
  */
 async function checkForCachedTranslation(): Promise<void> {
-  if (!currentAdapter) return;
+  console.log('[Content] checkForCachedTranslation: Starting...');
+  
+  if (!currentAdapter) {
+    console.log('[Content] checkForCachedTranslation: No adapter');
+    return;
+  }
   
   const videoId = currentAdapter.getVideoId();
-  if (!videoId) return;
+  if (!videoId) {
+    console.log('[Content] checkForCachedTranslation: No videoId');
+    return;
+  }
   
   const tracks = await currentAdapter.getSubtitleTracks();
-  if (tracks.length === 0) return;
+  if (tracks.length === 0) {
+    console.log('[Content] checkForCachedTranslation: No tracks');
+    return;
+  }
   
   const track = tracks[0];
   const preferences = await getPreferencesFromBridge();
+  
+  console.log('[Content] checkForCachedTranslation: Checking cache for', {
+    videoId,
+    sourceLanguage: track.language,
+    targetLanguage: preferences.defaultTargetLanguage,
+  });
   
   try {
     const cached = await getCachedTranslation({
@@ -871,19 +978,28 @@ async function checkForCachedTranslation(): Promise<void> {
       targetLanguage: preferences.defaultTargetLanguage,
     });
     
-    if (cached.found && cached.subtitle) {
-      translateButton?.setState('cached');
-      floatingButton?.setState('cached');
-      translatedCues = cached.subtitle.cues;
+    console.log('[Content] checkForCachedTranslation: Result', { found: cached.found, hasCues: !!cached.subtitle?.cues?.length });
+    
+    if (cached.found && cached.subtitle?.cues?.length) {
+      const cueCount = cached.subtitle.cues.length;
+      console.log(`[Content] Found cached translation with ${cueCount} cues, attempting auto-load...`);
       
-      const cueCount = cached.subtitle.cues?.length || 0;
-      console.log(`[Content] Found cached translation with ${cueCount} cues`);
+      // Try to auto-load the cached translation
+      const autoLoadSuccess = await autoLoadCachedTranslation(
+        cached.subtitle.cues,
+        preferences.defaultTargetLanguage
+      );
       
-      // Show a subtle notification that cached translation is available
-      showInfoToast(`已有翻譯快取 (${cueCount} 句)，點擊按鈕即可載入`);
+      if (!autoLoadSuccess) {
+        // Fallback to old behavior: show cached state and let user click
+        translateButton?.setState('cached');
+        floatingButton?.setState('cached');
+        translatedCues = cached.subtitle.cues;
+        showInfoToast(`已有翻譯快取 (${cueCount} 句)，點擊按鈕即可載入`);
+      }
     }
-  } catch {
-    // Ignore cache errors
+  } catch (error) {
+    console.warn('[Content] checkForCachedTranslation: Error', error);
   }
 }
 
