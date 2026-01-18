@@ -18,6 +18,7 @@ import type {
   GetCachedTranslationMessage,
   GetAuthStatusMessage,
   TranslateTextMessage,
+  SaveTranslationMessage,
 } from '../shared/types/messages';
 import { ProviderFactory } from '../shared/providers/factory';
 import { getUserSettings } from '../shared/utils/preferences';
@@ -392,6 +393,41 @@ messageHandler.on('TRANSLATE_TEXT', async (message: TranslateTextMessage, _sende
         message: error instanceof Error ? error.message : 'Unknown error',
       },
     };
+  }
+});
+
+// Handler for SAVE_TRANSLATION (save translated subtitle to cache)
+messageHandler.on('SAVE_TRANSLATION', async (message: SaveTranslationMessage, _sender) => {
+  const { videoId, platform, sourceLanguage, targetLanguage, subtitle } = message.payload;
+  
+  console.log('[Background] Save translation requested:', {
+    videoId,
+    platform,
+    sourceLanguage,
+    targetLanguage,
+    cueCount: subtitle.cues.length,
+  });
+  
+  try {
+    // Get user settings to determine provider
+    const settings = await getUserSettings();
+    const providerType = settings.selectedProvider || 'google-translate';
+    
+    // Save to cache
+    await translationService.saveToCache(
+      videoId,
+      sourceLanguage,
+      targetLanguage,
+      providerType,
+      'default',
+      subtitle
+    );
+    
+    console.log('[Background] Translation saved to cache');
+    return successResponse({ saved: true });
+  } catch (error) {
+    console.error('[Background] Failed to save translation:', error);
+    return successResponse({ saved: false });
   }
 });
 

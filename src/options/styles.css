@@ -546,3 +546,85 @@ body {
 .subscription-status.error .status-text p {
   color: #721c24;
 }
+
+/* OAuth Section */
+.oauth-section {
+  padding: 16px;
+  background: #f0f8ff;
+  border: 1px solid #007aff;
+  border-radius: 8px;
+  margin-bottom: 20px;
+}
+
+.oauth-section h3 {
+  color: #007aff;
+  margin: 0 0 8px;
+}
+
+.oauth-desc {
+  font-size: 13px;
+  color: #666;
+  margin: 0 0 16px;
+}
+
+.oauth-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background: #d4edda;
+  border-radius: 6px;
+  color: #155724;
+  font-weight: 500;
+  margin-bottom: 12px;
+}
+
+.oauth-status .status-icon {
+  color: #34c759;
+  font-size: 18px;
+}
+
+.oauth-status.success {
+  background: #d4edda;
+  color: #155724;
+}
+
+.oauth-actions {
+  display: flex;
+  gap: 12px;
+}
+
+.section-divider {
+  border: none;
+  border-top: 1px solid #eee;
+  margin: 24px 0;
+}
+
+/* Legacy Login Details */
+.legacy-login {
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 0;
+}
+
+.legacy-login summary {
+  padding: 12px 16px;
+  cursor: pointer;
+  font-weight: 500;
+  color: #666;
+  background: #f8f9fa;
+  border-radius: 8px;
+}
+
+.legacy-login summary:hover {
+  background: #f0f0f0;
+}
+
+.legacy-login[open] summary {
+  border-radius: 8px 8px 0 0;
+  border-bottom: 1px solid #ddd;
+}
+
+.legacy-login > *:not(summary) {
+  padding: 16px;
+}

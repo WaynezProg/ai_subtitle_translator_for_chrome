@@ -9,6 +9,29 @@
  * XHR/fetch interception and doesn't have access to chrome.runtime.
  */
 
+/**
+ * Check if extension context is still valid
+ */
+function isExtensionContextValid(): boolean {
+  try {
+    // Accessing chrome.runtime.id will throw if context is invalidated
+    return !!chrome.runtime?.id;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Safely send message to background, handling context invalidation
+ */
+async function safeSendMessage(message: unknown): Promise<unknown> {
+  if (!isExtensionContextValid()) {
+    throw new Error('Extension context invalidated. Please refresh the page.');
+  }
+  
+  return chrome.runtime.sendMessage(message);
+}
+
 // Listen for messages from popup/background → forward to MAIN world
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'TOGGLE_SUBTITLES') {
@@ -44,6 +67,15 @@ window.addEventListener('message', (event) => {
   if (data?.type === 'AI_SUBTITLE_GET_VISIBILITY') {
     void (async (): Promise<void> => {
       try {
+        if (!isExtensionContextValid()) {
+          // Extension context invalidated, default to visible
+          window.postMessage({
+            type: 'AI_SUBTITLE_TOGGLE',
+            visible: true
+          }, '*');
+          return;
+        }
+        
         const result = await chrome.storage.local.get(['subtitleVisible']);
         const visible = result.subtitleVisible !== false;
         window.postMessage({
@@ -60,6 +92,17 @@ window.addEventListener('message', (event) => {
   // Handle storage get request from MAIN world
   if (data?.type === 'AI_SUBTITLE_STORAGE_GET') {
     const { requestId, keys } = data;
+    
+    // Check if extension context is still valid
+    if (!isExtensionContextValid()) {
+      window.postMessage({
+        type: 'AI_SUBTITLE_STORAGE_RESPONSE',
+        requestId,
+        data: {},
+        error: '擴充功能已更新，請重新整理頁面'
+      }, '*');
+      return;
+    }
     
     // Use Promise wrapper for chrome.storage.local.get
     new Promise<Record<string, unknown>>((resolve, reject) => {
@@ -91,6 +134,17 @@ window.addEventListener('message', (event) => {
   // Handle storage set request from MAIN world
   if (data?.type === 'AI_SUBTITLE_STORAGE_SET') {
     const { requestId, data: storageData } = data;
+    
+    // Check if extension context is still valid
+    if (!isExtensionContextValid()) {
+      window.postMessage({
+        type: 'AI_SUBTITLE_STORAGE_RESPONSE',
+        requestId,
+        success: false,
+        error: '擴充功能已更新，請重新整理頁面'
+      }, '*');
+      return;
+    }
     
     // Use Promise wrapper for chrome.storage.local.set
     new Promise<void>((resolve, reject) => {
@@ -125,21 +179,27 @@ window.addEventListener('message', (event) => {
     
     void (async (): Promise<void> => {
       try {
-        const response = await chrome.runtime.sendMessage(message);
+        const response = await safeSendMessage(message);
         window.postMessage({
           type: 'AI_SUBTITLE_BRIDGE_RESPONSE',
           requestId,
           response
         }, '*');
       } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Bridge communication failed';
+        const isContextInvalidated = errorMessage.includes('Extension context invalidated') ||
+                                      errorMessage.includes('context invalidated');
+        
         window.postMessage({
           type: 'AI_SUBTITLE_BRIDGE_RESPONSE',
           requestId,
           response: {
             success: false,
             error: {
-              code: 'BRIDGE_ERROR',
-              message: error instanceof Error ? error.message : 'Bridge communication failed'
+              code: isContextInvalidated ? 'EXTENSION_RELOADED' : 'BRIDGE_ERROR',
+              message: isContextInvalidated 
+                ? '擴充功能已更新，請重新整理頁面' 
+                : errorMessage
             }
           }
         }, '*');

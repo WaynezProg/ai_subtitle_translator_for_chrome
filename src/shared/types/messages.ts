@@ -123,6 +123,21 @@ export interface TranslateTextResponse extends Response<{
   cached: boolean;
 }> {}
 
+/**
+ * SAVE_TRANSLATION: Save translated subtitle to cache
+ */
+export interface SaveTranslationMessage extends Message<'SAVE_TRANSLATION', {
+  videoId: string;
+  platform: Platform;
+  sourceLanguage: string;
+  targetLanguage: string;
+  subtitle: Subtitle;
+}> {}
+
+export interface SaveTranslationResponse extends Response<{
+  saved: boolean;
+}> {}
+
 // ============================================================================
 // Background → Content Script Messages
 // ============================================================================
@@ -187,7 +202,8 @@ export type ContentToBackgroundMessage =
   | CancelTranslationMessage
   | GetCachedTranslationMessage
   | GetAuthStatusMessage
-  | TranslateTextMessage;
+  | TranslateTextMessage
+  | SaveTranslationMessage;
 
 /**
  * All background to content script messages

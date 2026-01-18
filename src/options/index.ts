@@ -17,6 +17,18 @@ import {
   maskApiKey,
 } from '../shared/utils/auth-storage';
 import { createProviderFromConfig } from '../shared/providers/factory';
+import {
+  launchClaudeOAuthFlow,
+  getStoredClaudeTokens,
+  clearClaudeTokens,
+  validateClaudeToken,
+} from '../shared/providers/claude-oauth';
+import {
+  launchChatGPTOAuthFlow,
+  getStoredChatGPTTokens,
+  clearChatGPTTokens,
+  validateChatGPTToken,
+} from '../shared/providers/chatgpt-oauth';
 
 document.addEventListener('DOMContentLoaded', () => {
   console.log('[Options] Options page loaded');
@@ -135,7 +147,19 @@ function initApiKeySection(): void {
 }
 
 function initSubscriptionSection(): void {
-  // Open login page button
+  // OAuth Login button (new recommended method)
+  const oauthLoginBtn = document.getElementById('oauth-login');
+  oauthLoginBtn?.addEventListener('click', () => {
+    void handleOAuthLogin();
+  });
+  
+  // OAuth Logout button
+  const oauthLogoutBtn = document.getElementById('oauth-logout');
+  oauthLogoutBtn?.addEventListener('click', () => {
+    void handleOAuthLogout();
+  });
+  
+  // Open login page button (legacy fallback)
   const openLoginBtn = document.getElementById('open-login-page');
   openLoginBtn?.addEventListener('click', () => {
     const providerRadio = document.querySelector('input[name="provider"]:checked') as HTMLInputElement;
@@ -163,6 +187,84 @@ function initSubscriptionSection(): void {
   tosCheckbox?.addEventListener('change', () => {
     void saveToSAcceptance(tosCheckbox.checked);
   });
+}
+
+async function handleOAuthLogin(): Promise<void> {
+  const providerRadio = document.querySelector('input[name="provider"]:checked') as HTMLInputElement;
+  const providerType = providerRadio?.value as ProviderType;
+  
+  if (providerType !== 'claude-subscription' && providerType !== 'chatgpt-subscription') {
+    showNotification('OAuth 登入僅支援 Claude Pro 和 ChatGPT Plus', 'error');
+    return;
+  }
+  
+  const loginBtn = document.getElementById('oauth-login') as HTMLButtonElement;
+  if (loginBtn) {
+    loginBtn.disabled = true;
+    loginBtn.textContent = '登入中...';
+  }
+  
+  try {
+    let accessToken: string;
+    
+    if (providerType === 'claude-subscription') {
+      const tokens = await launchClaudeOAuthFlow();
+      accessToken = tokens.accessToken;
+    } else {
+      const tokens = await launchChatGPTOAuthFlow();
+      accessToken = tokens.accessToken;
+    }
+    
+    // Save the OAuth credentials
+    await saveProviderCredentials(providerType, accessToken, undefined);
+    
+    const providerName = providerType === 'claude-subscription' ? 'Claude' : 'ChatGPT';
+    showNotification(`${providerName} OAuth 登入成功！`);
+    
+    // Update UI to show logged in state
+    await loadSubscriptionStatus(providerType);
+  } catch (error) {
+    console.error('[Options] OAuth login failed:', error);
+    const message = error instanceof Error ? error.message : 'OAuth 登入失敗';
+    showNotification(message, 'error');
+  } finally {
+    if (loginBtn) {
+      loginBtn.disabled = false;
+      loginBtn.textContent = '使用 OAuth 登入';
+    }
+  }
+}
+
+async function handleOAuthLogout(): Promise<void> {
+  const providerRadio = document.querySelector('input[name="provider"]:checked') as HTMLInputElement;
+  const providerType = providerRadio?.value as ProviderType;
+  
+  try {
+    if (providerType === 'claude-subscription') {
+      await clearClaudeTokens();
+    } else if (providerType === 'chatgpt-subscription') {
+      await clearChatGPTTokens();
+    }
+    
+    await deleteProviderCredentials(providerType);
+    
+    showNotification('已登出');
+    
+    // Update UI
+    const statusEl = document.getElementById('subscription-status');
+    const oauthStatusEl = document.getElementById('oauth-status');
+    statusEl?.classList.add('hidden');
+    oauthStatusEl?.classList.add('hidden');
+    
+    // Show login button, hide logout button
+    const loginBtn = document.getElementById('oauth-login');
+    const logoutBtn = document.getElementById('oauth-logout');
+    loginBtn?.classList.remove('hidden');
+    logoutBtn?.classList.add('hidden');
+  } catch (error) {
+    console.error('[Options] Logout failed:', error);
+    showNotification('登出失敗', 'error');
+  }
 }
 
 async function verifySubscription(): Promise<void> {
@@ -224,9 +326,74 @@ async function verifySubscription(): Promise<void> {
 async function loadSubscriptionStatus(providerType: ProviderType): Promise<void> {
   const statusEl = document.getElementById('subscription-status');
   const accountInfoEl = document.getElementById('subscription-account-info');
+  const oauthStatusEl = document.getElementById('oauth-status');
   const tosCheckbox = document.getElementById('accept-tos-disclaimer') as HTMLInputElement;
+  const loginBtn = document.getElementById('oauth-login');
+  const logoutBtn = document.getElementById('oauth-logout');
   
   try {
+    // Check for OAuth tokens first
+    if (providerType === 'claude-subscription') {
+      const tokens = await getStoredClaudeTokens();
+      
+      if (tokens?.accessToken) {
+        // Validate the token
+        const isValid = await validateClaudeToken(tokens.accessToken);
+        
+        if (isValid) {
+          oauthStatusEl?.classList.remove('hidden');
+          oauthStatusEl?.classList.add('success');
+          if (oauthStatusEl) {
+            oauthStatusEl.innerHTML = '<span class="status-icon">✓</span> Claude Pro (OAuth) 已連線';
+          }
+          
+          // Show logout button, hide login button
+          loginBtn?.classList.add('hidden');
+          logoutBtn?.classList.remove('hidden');
+          
+          return;
+        } else {
+          // Token invalid, clear it
+          await clearClaudeTokens();
+        }
+      }
+      
+      // No valid OAuth token, show login button
+      oauthStatusEl?.classList.add('hidden');
+      loginBtn?.classList.remove('hidden');
+      logoutBtn?.classList.add('hidden');
+    } else if (providerType === 'chatgpt-subscription') {
+      const tokens = await getStoredChatGPTTokens();
+      
+      if (tokens?.accessToken) {
+        // Validate the token
+        const isValid = await validateChatGPTToken(tokens.accessToken);
+        
+        if (isValid) {
+          oauthStatusEl?.classList.remove('hidden');
+          oauthStatusEl?.classList.add('success');
+          if (oauthStatusEl) {
+            oauthStatusEl.innerHTML = '<span class="status-icon">✓</span> ChatGPT Plus (OAuth) 已連線';
+          }
+          
+          // Show logout button, hide login button
+          loginBtn?.classList.add('hidden');
+          logoutBtn?.classList.remove('hidden');
+          
+          return;
+        } else {
+          // Token invalid, clear it
+          await clearChatGPTTokens();
+        }
+      }
+      
+      // No valid OAuth token, show login button
+      oauthStatusEl?.classList.add('hidden');
+      loginBtn?.classList.remove('hidden');
+      logoutBtn?.classList.add('hidden');
+    }
+    
+    // Fall back to legacy session-based auth check
     const authProvider = await getAuthProvider(providerType);
     
     if (authProvider?.status === 'valid') {
@@ -247,6 +414,7 @@ async function loadSubscriptionStatus(providerType: ProviderType): Promise<void>
   } catch (error) {
     console.error('[Options] Failed to load subscription status:', error);
     statusEl?.classList.add('hidden');
+    oauthStatusEl?.classList.add('hidden');
   }
 }
 

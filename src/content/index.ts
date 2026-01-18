@@ -21,6 +21,7 @@ import {
   getCachedTranslation,
   getAuthStatus,
   translateText,
+  saveTranslation,
   addMessageListener,
   setupMessageListener,
 } from './message-sender';
@@ -102,7 +103,12 @@ async function initialize(): Promise<void> {
   
   // Check for cached translation (non-blocking, may fail without chrome.runtime)
   checkForCachedTranslation().catch(err => {
-    console.warn('[Content] Cache check failed:', err);
+    // Silently ignore extension context invalidation errors
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    if (!errorMessage.includes('Extension context') && 
+        !errorMessage.includes('EXTENSION_RELOADED')) {
+      console.warn('[Content] Cache check failed:', err);
+    }
   });
   
   // Setup network status monitoring (may fail without chrome.runtime)
@@ -462,16 +468,55 @@ async function startRealtimeTranslation(targetLanguage: string): Promise<void> {
     
     console.log(`[Content] Found ${cues.length} cues to translate`);
     
-    // Initialize preTranslatedCuesWithTiming with original cues (translations will be filled in progressively)
-    preTranslatedCuesWithTiming = cues.map(cue => ({
-      startTime: cue.startTime,
-      endTime: cue.endTime,
-      originalText: cue.text,
-      translatedText: cue.text,  // Initially same as original, will be replaced
-    }));
+    // Check for cached translation first
+    const videoId = currentAdapter.getVideoId();
+    let useCachedTranslation = false;
     
-    // Create and start real-time translator immediately with original cues
-    // It will use whatever translations are available
+    if (videoId) {
+      try {
+        const cached = await getCachedTranslation({
+          videoId,
+          sourceLanguage: actualSourceLanguage,
+          targetLanguage,
+        });
+        
+        if (cached.found && cached.subtitle?.cues?.length) {
+          console.log(`[Content] Found cached translation with ${cached.subtitle.cues.length} cues`);
+          
+          // Use cached translations
+          preTranslatedCuesWithTiming = cached.subtitle.cues.map(cue => ({
+            startTime: cue.startTime,
+            endTime: cue.endTime,
+            originalText: cue.text,
+            translatedText: cue.translatedText || cue.text,
+          }));
+          
+          // Also populate the lookup map for fallback
+          for (const cue of cached.subtitle.cues) {
+            if (cue.text && cue.translatedText) {
+              preTranslatedCuesMap.set(cue.text, cue.translatedText);
+            }
+          }
+          
+          useCachedTranslation = true;
+          showInfoToast('已載入快取的翻譯');
+        }
+      } catch (error) {
+        console.warn('[Content] Failed to check cache:', error);
+      }
+    }
+    
+    // If no cache, initialize with original cues (translations will be filled in progressively)
+    if (!useCachedTranslation) {
+      preTranslatedCuesWithTiming = cues.map(cue => ({
+        startTime: cue.startTime,
+        endTime: cue.endTime,
+        originalText: cue.text,
+        translatedText: cue.text,  // Initially same as original, will be replaced
+      }));
+    }
+    
+    // Create and start real-time translator
     console.log('[Content] Starting realtime translator with', preTranslatedCuesWithTiming.length, 'cues');
     
     realtimeTranslator = createRealtimeTranslator({
@@ -501,10 +546,17 @@ async function startRealtimeTranslation(targetLanguage: string): Promise<void> {
       },
     });
     
-    // Start showing subtitles immediately (with original text until translations are ready)
+    // Start showing subtitles immediately
     realtimeTranslator.start();
     
-    // Now translate in background - don't block the UI
+    // If using cached translation, we're done
+    if (useCachedTranslation) {
+      translateButton?.setState('complete');
+      floatingButton?.setState('complete');
+      return;
+    }
+    
+    // Otherwise, translate in background - don't block the UI
     void translateInBackground(cues, actualSourceLanguage, targetLanguage);
     
   } catch (error) {
@@ -606,6 +658,43 @@ async function translateInBackground(
     translateButton?.setState('complete');
     floatingButton?.setState('complete');
     showSuccessToast(`翻譯完成！共 ${translatedCount} 句`);
+    
+    // Save to persistent cache for page refresh
+    const videoId = currentAdapter?.getVideoId();
+    if (videoId && currentPlatform) {
+      try {
+        await saveTranslation({
+          videoId,
+          platform: currentPlatform,
+          sourceLanguage,
+          targetLanguage,
+          subtitle: {
+            id: `${videoId}:${sourceLanguage}:${targetLanguage}`,
+            videoId,
+            platform: currentPlatform,
+            sourceLanguage,
+            targetLanguage,
+            format: 'webvtt',
+            cues: preTranslatedCuesWithTiming.map((cue, idx) => ({
+              index: idx,
+              startTime: cue.startTime,
+              endTime: cue.endTime,
+              text: cue.originalText,
+              translatedText: cue.translatedText,
+            })),
+            metadata: {
+              title: videoId,
+              cueCount: preTranslatedCuesWithTiming.length,
+            },
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          },
+        });
+        console.log('[Content] Translation saved to persistent cache');
+      } catch (error) {
+        console.warn('[Content] Failed to save translation to cache:', error);
+      }
+    }
     
   } finally {
     isPreTranslating = false;
@@ -786,7 +875,12 @@ async function checkForCachedTranslation(): Promise<void> {
       translateButton?.setState('cached');
       floatingButton?.setState('cached');
       translatedCues = cached.subtitle.cues;
-      console.log('[Content] Found cached translation');
+      
+      const cueCount = cached.subtitle.cues?.length || 0;
+      console.log(`[Content] Found cached translation with ${cueCount} cues`);
+      
+      // Show a subtle notification that cached translation is available
+      showInfoToast(`已有翻譯快取 (${cueCount} 句)，點擊按鈕即可載入`);
     }
   } catch {
     // Ignore cache errors

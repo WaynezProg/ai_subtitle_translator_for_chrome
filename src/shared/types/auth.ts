@@ -22,6 +22,7 @@ export type ProviderCredentials =
   | ApiKeyCredentials
   | OllamaCredentials
   | SubscriptionCredentials
+  | OAuthCredentials
   | GoogleTranslateCredentials;
 
 /**
@@ -54,7 +55,7 @@ export interface OllamaCredentials {
 }
 
 /**
- * Subscription credentials for Claude Pro/ChatGPT Plus
+ * Subscription credentials for Claude Pro/ChatGPT Plus (legacy session-based)
  */
 export interface SubscriptionCredentials {
   type: 'subscription';
@@ -62,6 +63,21 @@ export interface SubscriptionCredentials {
   encryptedSessionToken: string;
   /** Token expiration time */
   expiresAt?: string;
+}
+
+/**
+ * OAuth credentials for Claude Pro/ChatGPT Plus
+ */
+export interface OAuthCredentials {
+  type: 'oauth';
+  /** OAuth access token */
+  accessToken: string;
+  /** OAuth refresh token */
+  refreshToken?: string;
+  /** Token expiration timestamp (ISO 8601) */
+  expiresAt?: string;
+  /** Token scopes */
+  scopes?: string[];
 }
 
 /**

@@ -559,7 +559,7 @@ export class TranslationService {
   /**
    * Save translation to cache
    */
-  private async saveToCache(
+  async saveToCache(
     videoId: string,
     sourceLanguage: string,
     targetLanguage: string,

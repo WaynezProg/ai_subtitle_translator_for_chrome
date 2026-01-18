@@ -19,6 +19,8 @@ import type {
   GetAuthStatusResponse,
   TranslateTextMessage,
   TranslateTextResponse,
+  SaveTranslationMessage,
+  SaveTranslationResponse,
   BackgroundToContentMessage,
   Response,
 } from '../shared/types/messages';
@@ -204,6 +206,26 @@ export async function translateText(params: {
   return response.data;
 }
 
+/**
+ * Save translation to cache
+ */
+export async function saveTranslation(params: {
+  videoId: string;
+  platform: Platform;
+  sourceLanguage: string;
+  targetLanguage: string;
+  subtitle: Subtitle;
+}): Promise<{ saved: boolean }> {
+  const message: SaveTranslationMessage = {
+    type: 'SAVE_TRANSLATION',
+    payload: params,
+    requestId: generateRequestId(),
+  };
+  
+  const response = await sendMessage<SaveTranslationResponse>(message);
+  return response.data || { saved: false };
+}
+
 // ============================================================================
 // Message Listener
 // ============================================================================
@@ -287,6 +309,14 @@ export class MessageError extends Error {
   ) {
     super(message);
     this.name = 'MessageError';
+  }
+  
+  /**
+   * Check if this error is due to extension context being invalidated
+   */
+  isExtensionReloaded(): boolean {
+    return this.code === 'EXTENSION_RELOADED' || 
+           this.message.includes('Extension context invalidated');
   }
 }
 
