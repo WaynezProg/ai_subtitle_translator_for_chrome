@@ -6,13 +6,28 @@ A Chrome extension that translates subtitles on streaming platforms using AI ser
 
 - **Multi-platform support**: YouTube, Netflix, Disney+, Prime Video
 - **Multiple AI providers**:
+  - Google Translate (Free, recommended)
   - Claude API (Anthropic)
   - OpenAI API (GPT-4)
   - Ollama (local, offline)
+- **Two-phase translation** (for AI providers):
+  - Phase 1: Quick Google Translate for immediate results
+  - Phase 2: AI refinement with parallel batch processing (3x faster)
 - **Smart caching**: L1 memory + L2 IndexedDB with LRU eviction
 - **Real-time translation**: Stream translation progress
 - **Bilingual subtitles**: Show original and translated text together
 - **Customizable**: Font size, position, background style
+
+## Provider Status
+
+| Provider | Status | Notes |
+|----------|--------|-------|
+| Google Translate | ✅ Stable | Free, no API key required |
+| Claude API | ✅ Stable | Requires API key |
+| OpenAI API | ✅ Stable | Requires API key |
+| Ollama | ✅ Stable | Local, requires Ollama running |
+| Claude Pro (OAuth) | ❌ Unavailable | Anthropic restricts OAuth to Claude Code only |
+| ChatGPT Plus (OAuth) | ⚠️ Unstable | May be blocked by ChatGPT's security measures |
 
 ## Installation
 
@@ -45,9 +60,27 @@ A Chrome extension that translates subtitles on streaming platforms using AI ser
 1. Click the extension icon in Chrome toolbar
 2. Click "Settings" to open the options page
 3. Choose your preferred translation provider:
+   - **Google Translate**: No configuration needed (recommended for most users)
    - **Claude API**: Enter your Anthropic API key
    - **OpenAI API**: Enter your OpenAI API key
    - **Ollama**: Ensure Ollama is running locally (`ollama serve`)
+
+### Session Helper Tool
+
+For advanced users who want to use OAuth-based providers, a session helper tool is provided:
+
+```bash
+cd tools/session-helper
+python session_helper.py --help
+
+# Get ChatGPT OAuth token
+python session_helper.py chatgpt -y
+
+# Get Claude OAuth token  
+python session_helper.py claude -y
+```
+
+> **Note**: OAuth-based providers (Claude Pro, ChatGPT Plus) are currently unstable due to provider restrictions.
 
 ## Usage
 
@@ -142,6 +175,31 @@ Background Service Worker
     ↓ AI Provider API
 Translation Result
 ```
+
+### Translation Flow (AI Providers)
+
+When using AI providers (Claude API, OpenAI API), the extension uses a two-phase approach:
+
+```
+Phase 1: Quick Translation (0-50%)
+├── Uses Google Translate (fast path, no OAuth check)
+├── Batch processing for speed
+└── User sees immediate results
+
+Phase 2: AI Refinement (50-100%)
+├── Uses selected AI provider
+├── Parallel batch processing (3 batches at a time)
+├── Progressively replaces Phase 1 results
+└── ~3x faster than sequential processing
+```
+
+### Token Expiration Handling
+
+OAuth token validation follows the [OpenCode pattern](opencode-auth-api-guide.md):
+- Local expiration check first (fast, no network)
+- Unknown expiration: let API call validate
+- 401/403 errors: attempt refresh and retry
+- "Unusual activity" errors: don't clear tokens (not an auth issue)
 
 ## Testing
 
