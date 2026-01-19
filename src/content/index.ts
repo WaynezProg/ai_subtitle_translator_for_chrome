@@ -229,8 +229,8 @@ function createUIComponents(): void {
     platform: currentPlatform,
     renderOptions: currentRenderOptions,
     onSettingsChange: handleSettingsChange,
-    onCacheSelect: (cacheId: string) => void handleCacheSelect(cacheId),
-    onTranslate: () => void handleTranslateClick(),
+    onCacheSelect: handleCacheSelect,
+    onTranslate: handleTranslateClick,
   });
 
   // Mount buttons after player is ready

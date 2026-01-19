@@ -183,13 +183,19 @@ export function createFloatingButton(options: FloatingButtonOptions): FloatingBu
     closeBtn.className = 'floating-close';
     closeBtn.title = '最小化';
     closeBtn.textContent = '✕';
+    closeBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      toggleMinimize();
+    });
     button.appendChild(closeBtn);
 
     // Main button click
     button.addEventListener('click', (e) => {
       const target = e.target as HTMLElement;
+      // Skip if clicking on child buttons (they have their own handlers)
       if (target.classList.contains('floating-close') || target.classList.contains('floating-settings')) {
-        return; // Already handled by their own listeners
+        return;
       }
 
       e.preventDefault();

@@ -24,10 +24,10 @@ export interface SettingsPanelOptions {
   onSettingsChange: (options: Partial<RenderOptions>) => void;
 
   /** Callback when cached translation is selected */
-  onCacheSelect: (cacheId: string) => void;
+  onCacheSelect: (cacheId: string) => void | Promise<void>;
 
   /** Callback when translate button is clicked */
-  onTranslate: () => void;
+  onTranslate: () => void | Promise<void>;
 
   /** Platform for styling */
   platform: Platform;
@@ -182,7 +182,11 @@ export function createSettingsPanel(options: SettingsPanelOptions): SettingsPane
     const translateBtn = document.createElement('button');
     translateBtn.className = 'translate-action-btn';
     translateBtn.id = 'settings-translate-btn';
-    translateBtn.addEventListener('click', onTranslate);
+    translateBtn.addEventListener('click', () => {
+      Promise.resolve(onTranslate()).catch((error) => {
+        console.error('[SettingsPanel] Translation error:', error);
+      });
+    });
     updateTranslateButton(translateBtn);
     section.appendChild(translateBtn);
 
@@ -269,7 +273,11 @@ export function createSettingsPanel(options: SettingsPanelOptions): SettingsPane
     for (const cache of cachedTranslations) {
       const item = document.createElement('button');
       item.className = 'cache-item';
-      item.addEventListener('click', () => onCacheSelect(cache.id));
+      item.addEventListener('click', () => {
+        Promise.resolve(onCacheSelect(cache.id)).catch((error) => {
+          console.error('[SettingsPanel] Cache select error:', error);
+        });
+      });
 
       const info = document.createElement('div');
       info.className = 'cache-info';
