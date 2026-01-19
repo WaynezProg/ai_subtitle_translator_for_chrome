@@ -208,6 +208,14 @@ export class RealtimeTranslator {
   }
   
   /**
+   * Update the translated cues (used when uploading external translations)
+   */
+  updateTranslatedCues(cues: TranslatedCue[]): void {
+    this.options.translatedCues = cues;
+    console.log(`[RealtimeTranslator] Updated translated cues: ${cues.length} cues`);
+  }
+  
+  /**
    * Apply render options to the overlay element
    */
   private applyRenderOptionsToOverlay(): void {

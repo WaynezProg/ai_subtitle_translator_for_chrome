@@ -54,6 +54,54 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     sendResponse({ success: true });
   }
   
+  // Handle subtitle state query from popup
+  if (message.type === 'GET_SUBTITLE_STATE') {
+    const requestId = `subtitle-state-${Date.now()}`;
+    
+    // Set up listener for response from MAIN world
+    const responseHandler = (event: MessageEvent): void => {
+      if (event.source !== window) return;
+      if (event.data?.type === 'AI_SUBTITLE_STATE_RESPONSE' && event.data.requestId === requestId) {
+        window.removeEventListener('message', responseHandler);
+        sendResponse(event.data.state);
+      }
+    };
+    window.addEventListener('message', responseHandler);
+    
+    // Request state from MAIN world
+    window.postMessage({
+      type: 'AI_SUBTITLE_GET_STATE',
+      requestId
+    }, '*');
+    
+    // Timeout after 2 seconds
+    setTimeout(() => {
+      window.removeEventListener('message', responseHandler);
+      sendResponse(null);
+    }, 2000);
+    
+    return true; // Keep channel open for async response
+  }
+  
+  // Handle download request from popup
+  if (message.type === 'DOWNLOAD_SUBTITLE') {
+    window.postMessage({
+      type: 'AI_SUBTITLE_DOWNLOAD',
+      mode: message.payload.mode
+    }, '*');
+    sendResponse({ success: true });
+  }
+  
+  // Handle upload request from popup
+  if (message.type === 'UPLOAD_SUBTITLE') {
+    window.postMessage({
+      type: 'AI_SUBTITLE_UPLOAD',
+      content: message.payload.content,
+      filename: message.payload.filename
+    }, '*');
+    sendResponse({ success: true });
+  }
+  
   return true;
 });
 

@@ -5,11 +5,13 @@
 export * from './webvtt-parser';
 export * from './ttml-parser';
 export * from './json3-parser';
+export * from './srt-parser';
 
 import type { Cue, SubtitleFormat } from '../types/subtitle';
 import { parseWebVTT, isValidWebVTT } from './webvtt-parser';
 import { parseTTML, isValidTTML } from './ttml-parser';
 import { parseJSON3, isValidJSON3, isJSON3Format } from './json3-parser';
+import { parseSRT, isValidSRT, isSRTFormat } from './srt-parser';
 
 /**
  * Parse subtitle content based on format
@@ -22,6 +24,8 @@ export function parseSubtitle(content: string, format: SubtitleFormat): Cue[] {
       return parseTTML(content).cues;
     case 'json3':
       return parseJSON3(content).cues;
+    case 'srt':
+      return parseSRT(content).cues;
     default:
       throw new Error(`Unsupported subtitle format: ${format as string}`);
   }
@@ -48,13 +52,18 @@ export function detectSubtitleFormat(content: string): SubtitleFormat | null {
     return 'json3';
   }
   
+  // Check SRT (starts with number, then timing line)
+  if (isSRTFormat(trimmed)) {
+    return 'srt';
+  }
+  
   return null;
 }
 
 /**
  * Validate subtitle content based on format
  */
-export function isValidSubtitle(content: string, format: SubtitleFormat): boolean {
+export function isValidSubtitleContent(content: string, format: SubtitleFormat): boolean {
   switch (format) {
     case 'webvtt':
       return isValidWebVTT(content);
@@ -62,6 +71,8 @@ export function isValidSubtitle(content: string, format: SubtitleFormat): boolea
       return isValidTTML(content);
     case 'json3':
       return isValidJSON3(content);
+    case 'srt':
+      return isValidSRT(content);
     default:
       return false;
   }

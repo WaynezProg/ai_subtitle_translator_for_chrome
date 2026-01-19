@@ -370,6 +370,89 @@
   min-width: 80px;
 }
 
+/* Import/Export section */
+.subsection {
+  margin-bottom: 12px;
+}
+
+.subsection:last-child {
+  margin-bottom: 0;
+}
+
+.subsection-label {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.7);
+  margin-bottom: 8px;
+}
+
+/* Download buttons */
+.download-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.download-btn {
+  flex: 1;
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  color: #fff;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.download-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.download-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Upload area */
+.upload-area {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.upload-btn {
+  width: 100%;
+  padding: 10px;
+  font-size: 12px;
+  font-weight: 500;
+  background: rgba(76, 175, 80, 0.2);
+  border: 1px dashed rgba(76, 175, 80, 0.5);
+  border-radius: 4px;
+  color: rgba(76, 175, 80, 1);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.upload-btn:hover {
+  background: rgba(76, 175, 80, 0.3);
+  border-color: rgba(76, 175, 80, 0.7);
+}
+
+.upload-help {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+  text-align: center;
+}
+
+/* No subtitle message */
+.no-subtitle-message {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+  text-align: center;
+  padding: 8px 0;
+}
+
 /* Scrollbar styling */
 .ai-subtitle-settings-panel::-webkit-scrollbar {
   width: 6px;

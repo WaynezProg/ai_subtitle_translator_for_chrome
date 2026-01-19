@@ -10,7 +10,8 @@
 
 import type { RenderOptions } from '../adapters/types';
 import type { CachedTranslationInfo } from '../../shared/types/messages';
-import type { Platform } from '../../shared/types/subtitle';
+import type { Cue, Platform } from '../../shared/types/subtitle';
+import type { SRTGenerationMode } from '../../shared/utils/srt-generator';
 
 // ============================================================================
 // Types
@@ -28,6 +29,12 @@ export interface SettingsPanelOptions {
 
   /** Callback when translate button is clicked */
   onTranslate: () => void | Promise<void>;
+
+  /** Callback when download is requested */
+  onDownload?: (mode: SRTGenerationMode) => void | Promise<void>;
+
+  /** Callback when upload is completed */
+  onUpload?: (file: File) => void | Promise<void>;
 
   /** Platform for styling */
   platform: Platform;
@@ -63,6 +70,26 @@ export interface SettingsPanel {
 
   /** Set translation progress */
   setProgress(percent: number): void;
+
+  /** Update subtitle availability for download/upload */
+  updateSubtitleState(state: SubtitleState): void;
+}
+
+/**
+ * Subtitle state for download/upload UI
+ */
+export interface SubtitleState {
+  /** Whether original subtitles are available */
+  hasOriginal: boolean;
+  /** Whether translated subtitles are available */
+  hasTranslation: boolean;
+  /** Current cues (for download) */
+  cues?: Cue[];
+  /** Video metadata */
+  videoTitle?: string;
+  videoId?: string;
+  sourceLanguage?: string;
+  targetLanguage?: string;
 }
 
 // ============================================================================
@@ -101,7 +128,7 @@ const POSITION_OPTIONS = [
 // ============================================================================
 
 export function createSettingsPanel(options: SettingsPanelOptions): SettingsPanel {
-  const { onSettingsChange, onCacheSelect, onTranslate } = options;
+  const { onSettingsChange, onCacheSelect, onTranslate, onDownload, onUpload } = options;
   let currentOptions = { ...options.renderOptions };
   let panel: HTMLDivElement | null = null;
   let visible = false;
@@ -109,6 +136,10 @@ export function createSettingsPanel(options: SettingsPanelOptions): SettingsPane
   let cachedTranslations: CachedTranslationInfo[] = [];
   let translationState: 'idle' | 'translating' | 'complete' | 'error' = 'idle';
   let translationProgress = 0;
+  let subtitleState: SubtitleState = {
+    hasOriginal: false,
+    hasTranslation: false,
+  };
 
   /**
    * Debounced settings change handler
@@ -159,11 +190,179 @@ export function createSettingsPanel(options: SettingsPanelOptions): SettingsPane
     const translationSection = createTranslationSection();
     panelEl.appendChild(translationSection);
 
+    // Subtitle Import/Export section
+    const importExportSection = createImportExportSection();
+    panelEl.appendChild(importExportSection);
+
     // Display settings section
     const displaySection = createDisplaySection();
     panelEl.appendChild(displaySection);
 
     return panelEl;
+  }
+
+  /**
+   * Create import/export section for download and upload
+   */
+  function createImportExportSection(): HTMLElement {
+    const section = document.createElement('div');
+    section.className = 'settings-section';
+    section.id = 'settings-import-export-section';
+
+    const sectionHeader = document.createElement('div');
+    sectionHeader.className = 'section-header';
+    sectionHeader.textContent = '字幕匯入/匯出';
+    section.appendChild(sectionHeader);
+
+    // Download subsection
+    const downloadSubsection = document.createElement('div');
+    downloadSubsection.className = 'subsection';
+    downloadSubsection.id = 'settings-download-subsection';
+
+    const downloadLabel = document.createElement('div');
+    downloadLabel.className = 'subsection-label';
+    downloadLabel.textContent = '下載字幕 (SRT)';
+    downloadSubsection.appendChild(downloadLabel);
+
+    const downloadButtons = document.createElement('div');
+    downloadButtons.className = 'download-buttons';
+    downloadButtons.id = 'settings-download-buttons';
+    updateDownloadButtons(downloadButtons);
+    downloadSubsection.appendChild(downloadButtons);
+
+    section.appendChild(downloadSubsection);
+
+    // Upload subsection
+    const uploadSubsection = document.createElement('div');
+    uploadSubsection.className = 'subsection';
+
+    const uploadLabel = document.createElement('div');
+    uploadLabel.className = 'subsection-label';
+    uploadLabel.textContent = '上傳翻譯字幕';
+    uploadSubsection.appendChild(uploadLabel);
+
+    const uploadArea = document.createElement('div');
+    uploadArea.className = 'upload-area';
+    uploadArea.id = 'settings-upload-area';
+    updateUploadArea(uploadArea);
+    uploadSubsection.appendChild(uploadArea);
+
+    section.appendChild(uploadSubsection);
+
+    return section;
+  }
+
+  /**
+   * Update download buttons based on subtitle state
+   */
+  function updateDownloadButtons(container: HTMLElement): void {
+    clearChildren(container);
+
+    const hasOriginal = subtitleState.hasOriginal;
+    const hasTranslation = subtitleState.hasTranslation;
+
+    if (!hasOriginal) {
+      const noSubtitle = document.createElement('div');
+      noSubtitle.className = 'no-subtitle-message';
+      noSubtitle.textContent = '尚未擷取字幕';
+      container.appendChild(noSubtitle);
+      return;
+    }
+
+    // Download Original button
+    const downloadOriginalBtn = document.createElement('button');
+    downloadOriginalBtn.className = 'download-btn';
+    downloadOriginalBtn.textContent = '原文';
+    downloadOriginalBtn.title = '下載原文字幕';
+    downloadOriginalBtn.addEventListener('click', () => {
+      if (onDownload) {
+        Promise.resolve(onDownload('original')).catch((error) => {
+          console.error('[SettingsPanel] Download original error:', error);
+        });
+      }
+    });
+    container.appendChild(downloadOriginalBtn);
+
+    // Download Translated button
+    const downloadTranslatedBtn = document.createElement('button');
+    downloadTranslatedBtn.className = 'download-btn';
+    downloadTranslatedBtn.textContent = '譯文';
+    downloadTranslatedBtn.title = '下載翻譯字幕';
+    downloadTranslatedBtn.disabled = !hasTranslation;
+    downloadTranslatedBtn.addEventListener('click', () => {
+      if (onDownload && hasTranslation) {
+        Promise.resolve(onDownload('translated')).catch((error) => {
+          console.error('[SettingsPanel] Download translated error:', error);
+        });
+      }
+    });
+    container.appendChild(downloadTranslatedBtn);
+
+    // Download Bilingual button
+    const downloadBilingualBtn = document.createElement('button');
+    downloadBilingualBtn.className = 'download-btn';
+    downloadBilingualBtn.textContent = '雙語';
+    downloadBilingualBtn.title = '下載雙語字幕';
+    downloadBilingualBtn.disabled = !hasTranslation;
+    downloadBilingualBtn.addEventListener('click', () => {
+      if (onDownload && hasTranslation) {
+        Promise.resolve(onDownload('bilingual')).catch((error) => {
+          console.error('[SettingsPanel] Download bilingual error:', error);
+        });
+      }
+    });
+    container.appendChild(downloadBilingualBtn);
+  }
+
+  /**
+   * Update upload area
+   */
+  function updateUploadArea(container: HTMLElement): void {
+    clearChildren(container);
+
+    const hasOriginal = subtitleState.hasOriginal;
+
+    if (!hasOriginal) {
+      const noSubtitle = document.createElement('div');
+      noSubtitle.className = 'no-subtitle-message';
+      noSubtitle.textContent = '請先擷取原文字幕';
+      container.appendChild(noSubtitle);
+      return;
+    }
+
+    // Hidden file input
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = '.srt';
+    fileInput.id = 'settings-upload-input';
+    fileInput.style.display = 'none';
+    fileInput.addEventListener('change', () => {
+      const file = fileInput.files?.[0];
+      if (file && onUpload) {
+        Promise.resolve(onUpload(file)).catch((error) => {
+          console.error('[SettingsPanel] Upload error:', error);
+        });
+      }
+      // Reset input so same file can be selected again
+      fileInput.value = '';
+    });
+    container.appendChild(fileInput);
+
+    // Upload button
+    const uploadBtn = document.createElement('button');
+    uploadBtn.className = 'upload-btn';
+    uploadBtn.textContent = '選擇 SRT 檔案';
+    uploadBtn.title = '上傳翻譯好的 SRT 檔案';
+    uploadBtn.addEventListener('click', () => {
+      fileInput.click();
+    });
+    container.appendChild(uploadBtn);
+
+    // Help text
+    const helpText = document.createElement('div');
+    helpText.className = 'upload-help';
+    helpText.textContent = '上傳使用 ChatGPT/Claude 翻譯的字幕';
+    container.appendChild(helpText);
   }
 
   /**
@@ -742,6 +941,22 @@ export function createSettingsPanel(options: SettingsPanelOptions): SettingsPane
         if (btn) {
           updateTranslateButton(btn);
         }
+      }
+    },
+
+    updateSubtitleState(state: SubtitleState): void {
+      subtitleState = state;
+
+      // Update download buttons
+      const downloadButtons = panel?.querySelector('#settings-download-buttons');
+      if (downloadButtons) {
+        updateDownloadButtons(downloadButtons as HTMLElement);
+      }
+
+      // Update upload area
+      const uploadArea = panel?.querySelector('#settings-upload-area');
+      if (uploadArea) {
+        updateUploadArea(uploadArea as HTMLElement);
       }
     },
   };

@@ -7,6 +7,18 @@
  */
 
 import { getAuthConfig, getAuthProvider, type AuthProviderInfo } from '../shared/utils/auth-storage';
+import type { SRTGenerationMode } from '../shared/utils/srt-generator';
+
+// Subtitle state from content script
+interface SubtitleInfo {
+  hasOriginal: boolean;
+  hasTranslation: boolean;
+  videoTitle?: string;
+  videoId?: string;
+  sourceLanguage?: string;
+  targetLanguage?: string;
+  cueCount?: number;
+}
 
 document.addEventListener('DOMContentLoaded', () => {
   console.log('[Popup] Popup loaded');
@@ -20,11 +32,17 @@ document.addEventListener('DOMContentLoaded', () => {
   // Initialize subtitle toggle
   initSubtitleToggle();
   
+  // Initialize subtitle management
+  initSubtitleManagement();
+  
   // Load and display current provider status
   void loadProviderStatus();
   
   // Load subtitle visibility state
   void loadSubtitleVisibility();
+  
+  // Load subtitle state from content script
+  void loadSubtitleState();
 });
 
 function initSubtitleToggle(): void {
@@ -149,4 +167,177 @@ function getProviderDisplayName(type: string): string {
     'google-translate': 'Google 翻譯'
   };
   return displayNames[type] ?? type;
+}
+
+// ============================================================================
+// Subtitle Management
+// ============================================================================
+
+function initSubtitleManagement(): void {
+  // Download buttons
+  const downloadOriginal = document.getElementById('download-original');
+  const downloadTranslated = document.getElementById('download-translated');
+  const downloadBilingual = document.getElementById('download-bilingual');
+  
+  downloadOriginal?.addEventListener('click', () => {
+    void triggerDownload('original');
+  });
+  
+  downloadTranslated?.addEventListener('click', () => {
+    void triggerDownload('translated');
+  });
+  
+  downloadBilingual?.addEventListener('click', () => {
+    void triggerDownload('bilingual');
+  });
+  
+  // Upload button
+  const uploadBtn = document.getElementById('upload-btn');
+  const uploadInput = document.getElementById('upload-srt') as HTMLInputElement;
+  
+  uploadBtn?.addEventListener('click', () => {
+    uploadInput?.click();
+  });
+  
+  uploadInput?.addEventListener('change', () => {
+    const file = uploadInput.files?.[0];
+    if (file) {
+      void triggerUpload(file);
+      uploadInput.value = ''; // Reset for next selection
+    }
+  });
+}
+
+async function loadSubtitleState(): Promise<void> {
+  const subtitleSection = document.getElementById('subtitle-section');
+  const statusText = document.getElementById('subtitle-status-text');
+  const downloadOriginal = document.getElementById('download-original') as HTMLButtonElement;
+  const downloadTranslated = document.getElementById('download-translated') as HTMLButtonElement;
+  const downloadBilingual = document.getElementById('download-bilingual') as HTMLButtonElement;
+  const uploadBtn = document.getElementById('upload-btn') as HTMLButtonElement;
+  
+  try {
+    // Query active tab
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    const tabId = tabs[0]?.id;
+    
+    if (!tabId) {
+      if (subtitleSection) subtitleSection.style.display = 'none';
+      return;
+    }
+    
+    // Check if on supported video page
+    const tab = tabs[0];
+    const url = tab.url || '';
+    const isSupportedPage = isVideoPage(url);
+    
+    if (!isSupportedPage) {
+      if (subtitleSection) subtitleSection.style.display = 'none';
+      return;
+    }
+    
+    // Show section
+    if (subtitleSection) subtitleSection.style.display = 'block';
+    
+    // Query subtitle state from content script
+    try {
+      const response = await chrome.tabs.sendMessage(tabId, {
+        type: 'GET_SUBTITLE_STATE'
+      }) as SubtitleInfo | undefined;
+      
+      if (response) {
+        updateSubtitleUI(response, statusText, downloadOriginal, downloadTranslated, downloadBilingual, uploadBtn);
+      } else {
+        if (statusText) statusText.textContent = '尚未擷取字幕';
+      }
+    } catch {
+      // Content script may not be ready
+      if (statusText) statusText.textContent = '等待頁面載入...';
+    }
+  } catch (error) {
+    console.error('[Popup] Failed to load subtitle state:', error);
+    if (subtitleSection) subtitleSection.style.display = 'none';
+  }
+}
+
+function updateSubtitleUI(
+  info: SubtitleInfo,
+  statusText: HTMLElement | null,
+  downloadOriginal: HTMLButtonElement | null,
+  downloadTranslated: HTMLButtonElement | null,
+  downloadBilingual: HTMLButtonElement | null,
+  uploadBtn: HTMLButtonElement | null
+): void {
+  if (statusText) {
+    if (!info.hasOriginal) {
+      statusText.textContent = '尚未擷取字幕';
+    } else if (info.hasTranslation) {
+      statusText.textContent = `已翻譯 ${info.cueCount || 0} 句`;
+    } else {
+      statusText.textContent = `原文 ${info.cueCount || 0} 句`;
+    }
+  }
+  
+  if (downloadOriginal) {
+    downloadOriginal.disabled = !info.hasOriginal;
+  }
+  
+  if (downloadTranslated) {
+    downloadTranslated.disabled = !info.hasTranslation;
+  }
+  
+  if (downloadBilingual) {
+    downloadBilingual.disabled = !info.hasTranslation;
+  }
+  
+  if (uploadBtn) {
+    uploadBtn.disabled = !info.hasOriginal;
+  }
+}
+
+function isVideoPage(url: string): boolean {
+  const patterns = [
+    /youtube\.com\/watch/,
+    /netflix\.com\/watch/,
+    /disneyplus\.com\/video/,
+    /primevideo\.com\/detail/,
+    /amazon\.com\/gp\/video/
+  ];
+  
+  return patterns.some(pattern => pattern.test(url));
+}
+
+async function triggerDownload(mode: SRTGenerationMode): Promise<void> {
+  try {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    const tabId = tabs[0]?.id;
+    
+    if (!tabId) return;
+    
+    await chrome.tabs.sendMessage(tabId, {
+      type: 'DOWNLOAD_SUBTITLE',
+      payload: { mode }
+    });
+  } catch (error) {
+    console.error('[Popup] Failed to trigger download:', error);
+  }
+}
+
+async function triggerUpload(file: File): Promise<void> {
+  try {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    const tabId = tabs[0]?.id;
+    
+    if (!tabId) return;
+    
+    // Read file content
+    const content = await file.text();
+    
+    await chrome.tabs.sendMessage(tabId, {
+      type: 'UPLOAD_SUBTITLE',
+      payload: { content, filename: file.name }
+    });
+  } catch (error) {
+    console.error('[Popup] Failed to trigger upload:', error);
+  }
 }

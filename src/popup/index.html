@@ -40,6 +40,29 @@
           </label>
         </div>
       </section>
+      <section id="subtitle-section" class="subtitle-section" style="display: none;">
+        <h2 class="section-title">字幕管理</h2>
+        <div id="subtitle-status" class="subtitle-status">
+          <span id="subtitle-status-text">載入中...</span>
+        </div>
+        <div id="subtitle-actions" class="subtitle-actions">
+          <div class="action-group">
+            <span class="action-label">下載</span>
+            <div class="action-buttons">
+              <button id="download-original" class="btn btn-small" disabled>原文</button>
+              <button id="download-translated" class="btn btn-small" disabled>譯文</button>
+              <button id="download-bilingual" class="btn btn-small" disabled>雙語</button>
+            </div>
+          </div>
+          <div class="action-group">
+            <span class="action-label">上傳</span>
+            <div class="action-buttons">
+              <input type="file" id="upload-srt" accept=".srt" style="display: none;">
+              <button id="upload-btn" class="btn btn-small btn-upload" disabled>選擇 SRT</button>
+            </div>
+          </div>
+        </div>
+      </section>
       <section id="actions-section">
         <button id="open-options" class="btn btn-primary">設定</button>
       </section>

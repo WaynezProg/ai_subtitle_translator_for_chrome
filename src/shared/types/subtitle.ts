@@ -12,7 +12,7 @@ export type Platform = 'youtube' | 'netflix' | 'disney' | 'prime';
 /**
  * Supported subtitle formats
  */
-export type SubtitleFormat = 'webvtt' | 'ttml' | 'json3';
+export type SubtitleFormat = 'webvtt' | 'ttml' | 'json3' | 'srt';
 
 /**
  * Represents a complete subtitle file with all cues

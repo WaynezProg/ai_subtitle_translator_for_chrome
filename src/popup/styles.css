@@ -231,6 +231,78 @@ body {
   background: #dee2e6;
 }
 
+/* Subtitle section */
+.subtitle-section {
+  margin-bottom: 16px;
+  background: #f8f9fa;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #495057;
+  margin-bottom: 8px;
+}
+
+.subtitle-status {
+  font-size: 12px;
+  color: #6c757d;
+  margin-bottom: 10px;
+}
+
+.subtitle-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.action-group {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.action-label {
+  font-size: 12px;
+  color: #6c757d;
+}
+
+.action-buttons {
+  display: flex;
+  gap: 4px;
+}
+
+.btn-small {
+  padding: 6px 10px;
+  font-size: 11px;
+  border-radius: 4px;
+  background: #e9ecef;
+  border: none;
+  color: #495057;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.btn-small:hover:not(:disabled) {
+  background: #dee2e6;
+}
+
+.btn-small:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-upload {
+  background: #d4edda;
+  color: #155724;
+}
+
+.btn-upload:hover:not(:disabled) {
+  background: #c3e6cb;
+}
+
 /* Footer */
 .popup-footer {
   padding: 8px 16px;
