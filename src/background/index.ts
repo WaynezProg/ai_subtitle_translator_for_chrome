@@ -18,12 +18,14 @@ import type {
   GetCachedTranslationMessage,
   GetAuthStatusMessage,
   TranslateTextMessage,
+  TranslateBatchMessage,
   SaveTranslationMessage,
   ValidateOAuthTokenMessage,
 } from '../shared/types/messages';
 import { ProviderFactory } from '../shared/providers/factory';
 import { getUserSettings } from '../shared/utils/preferences';
-import type { AuthProvider, ProviderCredentials, ProviderStatus } from '../shared/types/auth';
+import { getAuthConfig } from '../shared/utils/auth-storage';
+import type { AuthProvider, ProviderCredentials, ProviderStatus, ProviderType } from '../shared/types/auth';
 import { storeClaudeTokens, getValidClaudeToken, getStoredClaudeTokens } from '../shared/providers/claude-oauth';
 import { storeChatGPTTokens, getValidChatGPTToken } from '../shared/providers/chatgpt-oauth';
 
@@ -48,6 +50,24 @@ declare const __PRELOADED_CHATGPT_TOKEN__: {
 // ============================================================================
 
 console.log('[Background] AI Subtitle Translator Service Worker initialized');
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+/**
+ * Get the currently selected provider from auth config
+ * This is the source of truth for which provider to use
+ */
+async function getSelectedProvider(): Promise<ProviderType> {
+  try {
+    const authConfig = await getAuthConfig();
+    return authConfig.selectedProvider || 'google-translate';
+  } catch (error) {
+    console.warn('[Background] Failed to get auth config, using default provider:', error);
+    return 'google-translate';
+  }
+}
 
 // ============================================================================
 // Preloaded Token Initialization
@@ -109,10 +129,11 @@ messageHandler.on('SUBTITLE_DETECTED', async (message: SubtitleDetectedMessage, 
   });
   
   try {
-    // Get user preferences to determine target language and provider
+    // Get user preferences to determine target language
     const settings = await getUserSettings();
     const targetLanguage = settings.targetLanguage || 'zh-TW';
-    const providerType = settings.selectedProvider || 'claude-subscription';
+    // Get provider from auth config (source of truth)
+    const providerType = await getSelectedProvider();
     
     // Check cache for existing translation
     const cacheResult = await translationService.checkCache(
@@ -171,9 +192,8 @@ messageHandler.on('REQUEST_TRANSLATION', async (message: RequestTranslationMessa
   }
   
   try {
-    // Get user settings to determine provider
-    const settings = await getUserSettings();
-    const providerType = settings.selectedProvider || 'google-translate';
+    // Get provider from auth config (source of truth)
+    const providerType = await getSelectedProvider();
     
     // Get auth config from storage
     const authConfig = await chrome.storage.local.get(['authConfig']);
@@ -282,10 +302,8 @@ messageHandler.on('CANCEL_TRANSLATION', async (message: CancelTranslationMessage
 messageHandler.on('GET_CACHED_TRANSLATION', async (message: GetCachedTranslationMessage, _sender) => {
   const { videoId, sourceLanguage, targetLanguage } = message.payload;
   
-  // Get user preferences to determine provider
-  // Use 'google-translate' as default to match SAVE_TRANSLATION handler
-  const settings = await getUserSettings();
-  const providerType = settings.selectedProvider || 'google-translate';
+  // Get provider from auth config (source of truth)
+  const providerType = await getSelectedProvider();
   
   console.log('[Background] Cache lookup:', {
     videoId,
@@ -340,35 +358,64 @@ messageHandler.on('GET_AUTH_STATUS', async (_message: GetAuthStatusMessage, _sen
   console.log('[Background] Auth status requested');
   
   try {
-    // Get user settings to check configured provider
-    const settings = await getUserSettings();
-    const providerType = settings.selectedProvider;
+    // Get full auth config (source of truth)
+    const authConfig = await getAuthConfig();
+    const selectedProvider = authConfig.selectedProvider || 'google-translate';
     
-    // Check auth config
-    const authConfig = await chrome.storage.local.get(['authConfig']);
-    const config = authConfig.authConfig as { selectedProvider?: string } | undefined;
-    const selectedProvider = config?.selectedProvider || providerType || 'google-translate';
+    console.log(`[Background] Auth status check for provider: ${selectedProvider}`);
     
-    // Google Translate and Ollama don't need API keys
-    const noAuthRequired = ['google-translate', 'ollama'];
-    if (noAuthRequired.includes(selectedProvider)) {
+    // Google Translate doesn't need any auth
+    if (selectedProvider === 'google-translate') {
       console.log(`[Background] Provider ${selectedProvider} requires no auth`);
       return successResponse({
         configured: true,
-        provider: selectedProvider as import('../shared/types/auth').ProviderType,
+        provider: selectedProvider,
         status: { state: 'valid', validatedAt: new Date().toISOString() },
       });
     }
     
-    // For API providers, check if credentials exist
-    const providers = (authConfig.authConfig as { providers?: Record<string, unknown> })?.providers || {};
-    const providerConfig = providers[selectedProvider];
+    // Ollama just needs endpoint (optional, has default)
+    if (selectedProvider === 'ollama') {
+      console.log(`[Background] Provider ${selectedProvider} requires no auth`);
+      return successResponse({
+        configured: true,
+        provider: selectedProvider,
+        status: { state: 'valid', validatedAt: new Date().toISOString() },
+      });
+    }
     
-    if (providerConfig) {
+    // Subscription providers need OAuth tokens
+    if (selectedProvider === 'claude-subscription') {
+      const claudeToken = await getValidClaudeToken();
+      if (claudeToken) {
+        console.log(`[Background] Provider ${selectedProvider} has valid token`);
+        return successResponse({
+          configured: true,
+          provider: selectedProvider,
+          status: { state: 'valid', validatedAt: new Date().toISOString() },
+        });
+      }
+    }
+    
+    if (selectedProvider === 'chatgpt-subscription') {
+      const chatgptToken = await getValidChatGPTToken();
+      if (chatgptToken) {
+        console.log(`[Background] Provider ${selectedProvider} has valid token`);
+        return successResponse({
+          configured: true,
+          provider: selectedProvider,
+          status: { state: 'valid', validatedAt: new Date().toISOString() },
+        });
+      }
+    }
+    
+    // For API providers, check if credentials exist in config
+    const providerConfig = authConfig.providers[selectedProvider];
+    if (providerConfig?.apiKey || providerConfig?.endpoint) {
       console.log(`[Background] Provider ${selectedProvider} is configured`);
       return successResponse({
         configured: true,
-        provider: selectedProvider as import('../shared/types/auth').ProviderType,
+        provider: selectedProvider,
         status: { state: 'valid', validatedAt: new Date().toISOString() },
       });
     }
@@ -376,7 +423,7 @@ messageHandler.on('GET_AUTH_STATUS', async (_message: GetAuthStatusMessage, _sen
     console.log(`[Background] Provider ${selectedProvider} is not configured`);
     return successResponse({
       configured: false,
-      provider: selectedProvider as import('../shared/types/auth').ProviderType,
+      provider: selectedProvider,
       status: { state: 'unconfigured' },
     });
   } catch (error) {
@@ -392,26 +439,24 @@ messageHandler.on('GET_AUTH_STATUS', async (_message: GetAuthStatusMessage, _sen
 
 // Handler for TRANSLATE_TEXT (real-time single text translation)
 messageHandler.on('TRANSLATE_TEXT', async (message: TranslateTextMessage, _sender) => {
-  const { text, sourceLanguage, targetLanguage, context } = message.payload;
+  const { text, sourceLanguage, targetLanguage, context, forceProvider } = message.payload;
 
-  // Get user settings first to log provider info
-  const settings = await getUserSettings();
-  const providerType = settings.selectedProvider || 'google-translate';
+  // Use forced provider if specified, otherwise get from auth config
+  const providerType = forceProvider || await getSelectedProvider();
 
   console.log('[Background] Real-time translation requested:', {
     textLength: text.length,
     sourceLanguage,
     targetLanguage,
     provider: providerType,
+    forceProvider: forceProvider || 'none',
     hasContext: !!(context?.previousCues?.length),
   });
 
   try {
-    // providerType already retrieved above for logging
-
-    // Get auth config
-    const authConfig = await chrome.storage.local.get(['authConfig']);
-    const config = authConfig.authConfig as Record<string, string | undefined> | undefined;
+    // Get auth config for credentials (only needed for non-google providers)
+    const fullAuthConfig = await getAuthConfig();
+    const providerConfig = fullAuthConfig.providers[providerType];
 
     // Build credentials based on provider type
     let credentials: ProviderCredentials;
@@ -422,16 +467,16 @@ messageHandler.on('TRANSLATE_TEXT', async (message: TranslateTextMessage, _sende
       case 'ollama':
         credentials = {
           type: 'ollama',
-          endpoint: config?.apiEndpoint || 'http://localhost:11434',
-          model: config?.model || 'llama3.2',
+          endpoint: providerConfig?.endpoint || 'http://localhost:11434',
+          model: providerConfig?.selectedModel || 'llama3.2',
         };
         break;
       case 'claude-api':
       case 'openai-api':
         credentials = {
           type: 'api-key',
-          encryptedApiKey: config?.apiKey || '',
-          model: config?.model || (providerType === 'claude-api' ? 'claude-sonnet-4-20250514' : 'gpt-4o'),
+          encryptedApiKey: providerConfig?.apiKey || '',
+          model: providerConfig?.selectedModel || (providerType === 'claude-api' ? 'claude-sonnet-4-20250514' : 'gpt-4o'),
         };
         break;
       case 'claude-subscription': {
@@ -508,13 +553,195 @@ messageHandler.on('TRANSLATE_TEXT', async (message: TranslateTextMessage, _sende
   }
 });
 
+// Handler for TRANSLATE_BATCH (batch translation with multiple cues)
+// This provides better context for AI translation and ensures proper cue separation
+messageHandler.on('TRANSLATE_BATCH', async (message: TranslateBatchMessage, _sender) => {
+  const { cues, sourceLanguage, targetLanguage, context, forceProvider } = message.payload;
+
+  // Use forced provider if specified, otherwise get from auth config
+  const providerType = forceProvider || await getSelectedProvider();
+  
+  // Debug: Also get the full auth config to see what's stored (only for non-google providers)
+  if (providerType !== 'google-translate') {
+    const fullAuthConfig = await getAuthConfig();
+    console.log('[Background] Full auth config:', JSON.stringify(fullAuthConfig, null, 2));
+  }
+
+  console.log('[Background] Batch translation requested:', {
+    cueCount: cues.length,
+    sourceLanguage,
+    targetLanguage,
+    provider: providerType,
+    forceProvider: forceProvider || 'none',
+    hasContext: !!(context?.previousCues?.length),
+  });
+
+  try {
+    // Fast path for Google Translate - skip all OAuth/API key logic
+    if (providerType === 'google-translate') {
+      console.log('[Background] Using Google Translate provider - fast path');
+      
+      const credentials: ProviderCredentials = { type: 'google-translate' };
+      const provider: AuthProvider = {
+        type: 'google-translate',
+        credentials,
+        status: { state: 'valid', validatedAt: new Date().toISOString() },
+        configuredAt: new Date().toISOString(),
+      };
+      
+      const translationProvider = ProviderFactory.tryCreate(provider);
+      if (!translationProvider) {
+        throw new Error('Google Translate provider not available');
+      }
+      
+      // Translate batch
+      const result = await translationProvider.translate({
+        cues: cues.map(c => ({ index: c.index, text: c.text })),
+        sourceLanguage,
+        targetLanguage,
+        model: '',
+      });
+      
+      return successResponse({
+        cues: result.cues.map(c => ({
+          index: c.index,
+          translatedText: c.translatedText,
+        })),
+        context: undefined,
+      });
+    }
+
+    // Regular path for other providers - need credentials
+    const fullAuthConfig = await getAuthConfig();
+    const providerConfig = fullAuthConfig.providers[providerType];
+
+    // Build credentials based on provider type
+    let credentials: ProviderCredentials;
+    switch (providerType) {
+      case 'ollama':
+        credentials = {
+          type: 'ollama',
+          endpoint: providerConfig?.endpoint || 'http://localhost:11434',
+          model: providerConfig?.selectedModel || 'llama3.2',
+        };
+        break;
+      case 'claude-api':
+      case 'openai-api':
+        credentials = {
+          type: 'api-key',
+          encryptedApiKey: providerConfig?.apiKey || '',
+          model: providerConfig?.selectedModel || (providerType === 'claude-api' ? 'claude-sonnet-4-20250514' : 'gpt-4o'),
+        };
+        break;
+      case 'claude-subscription': {
+        const claudeToken = await getValidClaudeToken();
+        console.log('[Background] Claude token for batch:', { hasToken: !!claudeToken });
+        if (!claudeToken) {
+          throw new Error('Claude token expired. Please re-authenticate in Options.');
+        }
+        credentials = {
+          type: 'oauth',
+          accessToken: claudeToken,
+        };
+        break;
+      }
+      case 'chatgpt-subscription': {
+        console.log('[Background] ChatGPT subscription provider - getting OAuth token');
+        const chatgptToken = await getValidChatGPTToken();
+        console.log('[Background] ChatGPT token for batch:', { hasToken: !!chatgptToken });
+        if (!chatgptToken) {
+          throw new Error('ChatGPT token expired. Please re-authenticate in Options.');
+        }
+        credentials = {
+          type: 'oauth',
+          accessToken: chatgptToken,
+        };
+        break;
+      }
+      default:
+        credentials = { type: 'google-translate' };
+    }
+
+    // Build provider
+    const provider: AuthProvider = {
+      type: providerType,
+      credentials,
+      status: { state: 'valid', validatedAt: new Date().toISOString() },
+      configuredAt: new Date().toISOString(),
+    };
+
+    // Create provider instance
+    const translationProvider = ProviderFactory.tryCreate(provider);
+    if (!translationProvider) {
+      throw new Error(`Provider ${providerType} not available`);
+    }
+
+    // Build previousContext for provider if context is provided
+    const previousContext = context?.previousCues?.length
+      ? {
+          previousCues: context.previousCues,
+          characters: {},
+        }
+      : undefined;
+
+    // Get the model from credentials (or empty string for providers that don't need it)
+    const model = credentials.type === 'api-key' 
+      ? (credentials.model || '')
+      : credentials.type === 'ollama'
+        ? (credentials.model || '')
+        : '';
+
+    // Translate batch with proper cue structure
+    const result = await translationProvider.translate({
+      cues: cues.map(c => ({ index: c.index, text: c.text })),
+      sourceLanguage,
+      targetLanguage,
+      model,
+      previousContext,
+    });
+
+    // Build context for next batch (last 3 translations)
+    const lastCues = result.cues.slice(-3);
+    const newContext = {
+      previousCues: lastCues.map(c => {
+        const original = cues.find(orig => orig.index === c.index);
+        return {
+          original: original?.text || '',
+          translated: c.translatedText,
+        };
+      }),
+    };
+
+    console.log('[Background] Batch translation completed:', {
+      inputCount: cues.length,
+      outputCount: result.cues.length,
+    });
+
+    return successResponse({
+      cues: result.cues.map(c => ({
+        index: c.index,
+        translatedText: c.translatedText,
+      })),
+      context: newContext,
+    });
+  } catch (error) {
+    console.error('[Background] Batch translation failed:', error);
+    return {
+      success: false,
+      error: {
+        code: 'TRANSLATION_FAILED',
+        message: error instanceof Error ? error.message : 'Unknown error',
+      },
+    };
+  }
+});
+
 // Handler for SAVE_TRANSLATION (save translated subtitle to cache)
 messageHandler.on('SAVE_TRANSLATION', async (message: SaveTranslationMessage, _sender) => {
   const { videoId, platform, sourceLanguage, targetLanguage, subtitle } = message.payload;
   
-  // Get user settings to determine provider
-  const settings = await getUserSettings();
-  const providerType = settings.selectedProvider || 'google-translate';
+  // Get provider from auth config (source of truth)
+  const providerType = await getSelectedProvider();
   
   console.log('[Background] Save translation requested:', {
     videoId,
@@ -563,67 +790,82 @@ messageHandler.on('VALIDATE_OAUTH_TOKEN', async (message: ValidateOAuthTokenMess
       }
 
       // Try to get stored tokens and check expiration
+      // Following opencode pattern: prioritize local expiration check
       const storedTokens = await getStoredClaudeTokens();
+      
+      // Helper function to attempt token refresh
+      const attemptRefresh = async (): Promise<{ valid: boolean; error?: string }> => {
+        if (!storedTokens?.refreshToken) {
+          return { valid: false, error: 'Token expired and no refresh token available' };
+        }
+        
+        try {
+          console.log('[Background] Attempting token refresh...');
+          const refreshResponse = await fetch('https://console.anthropic.com/v1/oauth/token', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: new URLSearchParams({
+              grant_type: 'refresh_token',
+              refresh_token: storedTokens.refreshToken,
+              client_id: '9d1c250a-e61b-44d9-88ed-5944d1962f5e',
+            }),
+          });
+
+          if (refreshResponse.ok) {
+            const data = await refreshResponse.json() as {
+              access_token: string;
+              refresh_token?: string;
+              expires_in?: number;
+            };
+
+            // Store the new tokens with proper expiresAt
+            const newExpiresAt = data.expires_in
+              ? new Date(Date.now() + data.expires_in * 1000).toISOString()
+              : undefined;
+
+            await storeClaudeTokens({
+              accessToken: data.access_token,
+              refreshToken: data.refresh_token || storedTokens.refreshToken,
+              expiresAt: newExpiresAt,
+            });
+
+            console.log('[Background] Claude token refreshed successfully');
+            return { valid: true };
+          } else {
+            const errorText = await refreshResponse.text();
+            console.warn('[Background] Token refresh failed:', refreshResponse.status, errorText);
+            return { valid: false, error: 'Token expired and refresh failed' };
+          }
+        } catch (refreshError) {
+          console.error('[Background] Token refresh error:', refreshError);
+          return { valid: false, error: 'Token refresh failed' };
+        }
+      };
+      
+      // Check expiration if expiresAt is set
       if (storedTokens?.expiresAt) {
         const expiresAt = new Date(storedTokens.expiresAt).getTime();
-        const now = Date.now();
-        const bufferTime = 5 * 60 * 1000; // 5 minutes buffer
+        
+        // Check for invalid date
+        if (!isNaN(expiresAt)) {
+          const now = Date.now();
+          const bufferTime = 5 * 60 * 1000; // 5 minutes buffer
 
-        if (now >= expiresAt - bufferTime) {
-          // Token is expired or about to expire
-          if (storedTokens.refreshToken) {
-            // Try to refresh the token
-            try {
-              console.log('[Background] Token expired, attempting refresh...');
-              const refreshResponse = await fetch('https://console.anthropic.com/v1/oauth/token', {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/x-www-form-urlencoded',
-                },
-                body: new URLSearchParams({
-                  grant_type: 'refresh_token',
-                  refresh_token: storedTokens.refreshToken,
-                  client_id: '9d1c250a-e61b-44d9-88ed-5944d1962f5e',
-                }),
-              });
-
-              if (refreshResponse.ok) {
-                const data = await refreshResponse.json() as {
-                  access_token: string;
-                  refresh_token?: string;
-                  expires_in?: number;
-                };
-
-                // Store the new tokens
-                const newExpiresAt = data.expires_in
-                  ? new Date(Date.now() + data.expires_in * 1000).toISOString()
-                  : undefined;
-
-                await storeClaudeTokens({
-                  accessToken: data.access_token,
-                  refreshToken: data.refresh_token || storedTokens.refreshToken,
-                  expiresAt: newExpiresAt,
-                });
-
-                console.log('[Background] Claude token refreshed successfully');
-                return successResponse({ valid: true });
-              } else {
-                const errorText = await refreshResponse.text();
-                console.warn('[Background] Token refresh failed:', refreshResponse.status, errorText);
-                return successResponse({ valid: false, error: 'Token expired and refresh failed' });
-              }
-            } catch (refreshError) {
-              console.error('[Background] Token refresh error:', refreshError);
-              return successResponse({ valid: false, error: 'Token refresh failed' });
-            }
-          } else {
-            return successResponse({ valid: false, error: 'Token expired and no refresh token available' });
+          if (now >= expiresAt - bufferTime) {
+            // Token is expired or about to expire
+            const result = await attemptRefresh();
+            return successResponse(result);
           }
         }
       }
+      // Note: If expiresAt is not set, we assume token is valid
+      // Following opencode pattern: let API call determine validity
+      // The provider will handle 401/403 retry with token refresh
 
-      // Token format is valid and not expired
-      console.log('[Background] Claude token format valid and not expired');
+      // Token format is valid and not expired (or expiration unknown)
+      console.log('[Background] Claude token format valid and not expired (or expiration unknown)');
       return successResponse({ valid: true });
 
     } else if (provider === 'chatgpt') {

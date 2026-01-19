@@ -47,20 +47,20 @@
               <span class="provider-desc">本地運行，完全免費離線使用</span>
             </span>
           </label>
-          <label class="provider-option">
-            <input type="radio" name="provider" value="claude-subscription">
+          <label class="provider-option disabled" title="此選項目前因 Anthropic 限制而無法使用">
+            <input type="radio" name="provider" value="claude-subscription" disabled>
             <span class="provider-info">
               <span class="provider-name">Claude Pro</span>
-              <span class="provider-badge subscription">訂閱</span>
-              <span class="provider-desc">使用現有訂閱帳號</span>
+              <span class="provider-badge subscription unavailable">不可用</span>
+              <span class="provider-desc">⚠️ Anthropic 已限制 OAuth 只能用於 Claude Code</span>
             </span>
           </label>
-          <label class="provider-option">
-            <input type="radio" name="provider" value="chatgpt-subscription">
+          <label class="provider-option disabled" title="此選項目前不穩定，暫時停用">
+            <input type="radio" name="provider" value="chatgpt-subscription" disabled>
             <span class="provider-info">
               <span class="provider-name">ChatGPT Plus</span>
-              <span class="provider-badge subscription">訂閱</span>
-              <span class="provider-desc">使用現有訂閱帳號</span>
+              <span class="provider-badge subscription unstable">不穩定</span>
+              <span class="provider-desc">⚠️ 可能被 ChatGPT 偵測為異常活動而封鎖</span>
             </span>
           </label>
         </div>

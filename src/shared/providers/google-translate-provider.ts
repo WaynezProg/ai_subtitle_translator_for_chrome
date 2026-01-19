@@ -147,29 +147,18 @@ export class GoogleTranslateProvider implements TranslationProvider {
     
     const translatedCues: TranslatedCue[] = [];
     
-    // Translate cues in batches to avoid rate limiting
-    const batchSize = 10;
-    
-    for (let i = 0; i < request.cues.length; i += batchSize) {
-      const batch = request.cues.slice(i, i + batchSize);
-      
-      // Combine batch texts with a separator
-      const combinedText = batch.map(cue => cue.text).join('\n---SPLIT---\n');
-      
+    // Translate cues one by one to avoid separator translation issues
+    // Google Translate may translate text separators like "---SPLIT---" into target language
+    for (const cue of request.cues) {
       // Throttle requests
       await this.throttle();
       
-      const translatedText = await this.translateText(combinedText, sourceLang, targetLang);
+      const translatedText = await this.translateText(cue.text, sourceLang, targetLang);
       
-      // Split back into individual translations
-      const translations = translatedText.split(/\n?---SPLIT---\n?/);
-      
-      for (let j = 0; j < batch.length; j++) {
-        translatedCues.push({
-          index: batch[j].index,
-          translatedText: translations[j]?.trim() || batch[j].text,
-        });
-      }
+      translatedCues.push({
+        index: cue.index,
+        translatedText: translatedText.trim() || cue.text,
+      });
     }
     
     // Build context for next chunk

@@ -660,20 +660,29 @@ export class NetflixAdapter implements PlatformAdapter {
       // Skip video/audio chunks
       const isVideoChunk = /\/range\/\d+-\d+/.test(url);
       
+      // Debug: Log all non-chunk fetch requests to help diagnose subtitle capture issues
+      if (!isVideoChunk && (url.includes('nflx') || url.includes('netflix'))) {
+        console.log('[NetflixAdapter] Fetch request:', url.substring(0, 120));
+      }
+      
       // Check if this might be a subtitle request
       if (!isVideoChunk && adapter.isPotentialSubtitleUrl(url)) {
+        console.log('[NetflixAdapter] Potential subtitle URL detected:', url.substring(0, 100));
         const response = await adapter.originalFetch!.call(window, input, init);
         const clonedResponse = response.clone();
         
         try {
           const content = await clonedResponse.text();
+          console.log('[NetflixAdapter] Fetch response content length:', content.length, 'first 100 chars:', content.substring(0, 100));
           // Only capture if it's actually subtitle content
           if (content && adapter.isSubtitleContent(content)) {
             console.log('[NetflixAdapter] Captured subtitle from fetch:', url.substring(0, 80));
             adapter.captureSubtitleContent(url, content);
+          } else {
+            console.log('[NetflixAdapter] Not subtitle content, skipping');
           }
-        } catch {
-          // Silently ignore
+        } catch (e) {
+          console.warn('[NetflixAdapter] Failed to read fetch response:', e);
         }
         
         return response;

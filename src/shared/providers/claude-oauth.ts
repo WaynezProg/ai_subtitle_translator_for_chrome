@@ -261,11 +261,21 @@ export async function translateWithClaudeOAuth(
 
 /**
  * Check if the token is expired or about to expire (within 5 minutes)
+ * 
+ * Following opencode pattern:
+ * - If expiresAt is not set, return 'unknown' to indicate validation is needed
+ * - This allows the caller to decide whether to validate or refresh
  */
-export function isTokenExpired(expiresAt?: string): boolean {
-  if (!expiresAt) return false;
+export function isTokenExpired(expiresAt?: string): boolean | 'unknown' {
+  // If no expiration time is set, we can't determine expiration locally
+  // Return 'unknown' to signal that validation should be attempted
+  if (!expiresAt) return 'unknown';
   
   const expirationTime = new Date(expiresAt).getTime();
+  
+  // Check for invalid date
+  if (isNaN(expirationTime)) return 'unknown';
+  
   const bufferTime = 5 * 60 * 1000; // 5 minutes buffer
   
   return Date.now() >= expirationTime - bufferTime;
@@ -358,6 +368,12 @@ export async function clearClaudeTokens(): Promise<void> {
 
 /**
  * Get a valid access token, refreshing if necessary
+ * 
+ * Following opencode pattern (from your research document):
+ * - Prioritize local expiration check to avoid unnecessary server validation
+ * - If expiresAt is unknown, try to use the token (let API call handle 401/403)
+ * - If token is expired, attempt refresh
+ * - If API call fails with 401/403, the provider will handle refresh and retry
  */
 export async function getValidClaudeToken(): Promise<string | null> {
   const tokens = await getStoredClaudeTokens();
@@ -366,25 +382,41 @@ export async function getValidClaudeToken(): Promise<string | null> {
     return null;
   }
   
-  // Check if token is expired
-  if (isTokenExpired(tokens.expiresAt)) {
-    if (!tokens.refreshToken) {
-      // No refresh token, need to re-authenticate
-      await clearClaudeTokens();
-      return null;
-    }
-    
-    try {
-      // Refresh the token
-      const newTokens = await refreshClaudeToken(tokens.refreshToken);
-      await storeClaudeTokens(newTokens);
-      return newTokens.accessToken;
-    } catch {
-      // Refresh failed, clear tokens
-      await clearClaudeTokens();
-      return null;
-    }
+  // Check if token is expired based on stored expiration time
+  const expiredStatus = isTokenExpired(tokens.expiresAt);
+  
+  // If expiration status is unknown (no expiresAt set), return token directly
+  // Let the API call determine if it's valid - provider will handle 401/403 retry
+  if (expiredStatus === 'unknown') {
+    console.log('[ClaudeOAuth] No expiresAt set, returning token (API call will validate)');
+    return tokens.accessToken;
   }
   
-  return tokens.accessToken;
+  // Token is not expired locally, return it directly
+  if (expiredStatus === false) {
+    return tokens.accessToken;
+  }
+  
+  // Token is expired, attempt refresh
+  console.log('[ClaudeOAuth] Token expired based on expiresAt, attempting refresh...');
+  
+  if (!tokens.refreshToken) {
+    // No refresh token, need to re-authenticate
+    console.warn('[ClaudeOAuth] No refresh token available, clearing tokens');
+    await clearClaudeTokens();
+    return null;
+  }
+  
+  try {
+    // Refresh the token
+    const newTokens = await refreshClaudeToken(tokens.refreshToken);
+    await storeClaudeTokens(newTokens);
+    console.log('[ClaudeOAuth] Token refreshed successfully');
+    return newTokens.accessToken;
+  } catch (error) {
+    // Refresh failed, clear tokens
+    console.error('[ClaudeOAuth] Token refresh failed:', error);
+    await clearClaudeTokens();
+    return null;
+  }
 }

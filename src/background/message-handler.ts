@@ -20,6 +20,8 @@ import type {
   GetAuthStatusResponse,
   TranslateTextMessage,
   TranslateTextResponse,
+  TranslateBatchMessage,
+  TranslateBatchResponse,
   SaveTranslationMessage,
   SaveTranslationResponse,
   ValidateOAuthTokenMessage,
@@ -50,6 +52,7 @@ interface MessageHandlers {
   GET_CACHED_TRANSLATION: HandlerFunction<GetCachedTranslationMessage, GetCachedTranslationResponse>;
   GET_AUTH_STATUS: HandlerFunction<GetAuthStatusMessage, GetAuthStatusResponse>;
   TRANSLATE_TEXT: HandlerFunction<TranslateTextMessage, TranslateTextResponse>;
+  TRANSLATE_BATCH: HandlerFunction<TranslateBatchMessage, TranslateBatchResponse>;
   SAVE_TRANSLATION: HandlerFunction<SaveTranslationMessage, SaveTranslationResponse>;
   VALIDATE_OAUTH_TOKEN: HandlerFunction<ValidateOAuthTokenMessage, ValidateOAuthTokenResponse>;
 }

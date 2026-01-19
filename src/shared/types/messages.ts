@@ -129,11 +129,55 @@ export interface TranslateTextMessage extends Message<'TRANSLATE_TEXT', {
   targetLanguage: string;
   /** Optional context from previous batch for better translation consistency */
   context?: TranslationContextPayload;
+  /** Force a specific provider (e.g., 'google-translate' for quick translation) */
+  forceProvider?: 'google-translate';
 }> {}
 
 export interface TranslateTextResponse extends Response<{
   translatedText: string;
   cached: boolean;
+  /** Context to pass to next batch */
+  context?: TranslationContextPayload;
+}> {}
+
+/**
+ * Input cue for batch translation
+ */
+export interface BatchTranslationCue {
+  /** Cue index for ordering */
+  index: number;
+  /** Original text to translate */
+  text: string;
+}
+
+/**
+ * Translated cue result
+ */
+export interface TranslatedBatchCue {
+  /** Cue index matching input */
+  index: number;
+  /** Translated text */
+  translatedText: string;
+}
+
+/**
+ * TRANSLATE_BATCH: Request to translate multiple cues in a batch
+ * This provides better context for AI translation compared to single text translation
+ */
+export interface TranslateBatchMessage extends Message<'TRANSLATE_BATCH', {
+  /** Array of cues to translate */
+  cues: BatchTranslationCue[];
+  sourceLanguage: string;
+  targetLanguage: string;
+  /** Optional context from previous batch for better translation consistency */
+  context?: TranslationContextPayload;
+  /** Force a specific provider (e.g., 'google-translate' for quick Phase 1 translation) */
+  forceProvider?: 'google-translate';
+}> {}
+
+export interface TranslateBatchResponse extends Response<{
+  /** Translated cues with same indices as input */
+  cues: TranslatedBatchCue[];
   /** Context to pass to next batch */
   context?: TranslationContextPayload;
 }> {}
@@ -231,6 +275,7 @@ export type ContentToBackgroundMessage =
   | GetCachedTranslationMessage
   | GetAuthStatusMessage
   | TranslateTextMessage
+  | TranslateBatchMessage
   | SaveTranslationMessage
   | ValidateOAuthTokenMessage;
 

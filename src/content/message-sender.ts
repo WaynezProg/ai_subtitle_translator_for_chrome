@@ -19,6 +19,10 @@ import type {
   GetAuthStatusResponse,
   TranslateTextMessage,
   TranslateTextResponse,
+  TranslateBatchMessage,
+  TranslateBatchResponse,
+  BatchTranslationCue,
+  TranslatedBatchCue,
   SaveTranslationMessage,
   SaveTranslationResponse,
   BackgroundToContentMessage,
@@ -199,6 +203,8 @@ export async function translateText(params: {
       translated: string;
     }>;
   };
+  /** Force using a specific provider (e.g., 'google-translate' for quick initial translation) */
+  forceProvider?: 'google-translate';
 }): Promise<{ translatedText: string; cached: boolean }> {
   const message: TranslateTextMessage = {
     type: 'TRANSLATE_TEXT',
@@ -209,6 +215,37 @@ export async function translateText(params: {
   const response = await sendMessage<TranslateTextResponse>(message);
   if (!response.success || !response.data) {
     throw new Error(response.error?.message || 'Translation failed');
+  }
+  return response.data;
+}
+
+/**
+ * Translate multiple cues in a batch (for background pre-translation)
+ * This provides better context for AI translation and ensures proper cue separation
+ */
+export async function translateBatch(params: {
+  cues: BatchTranslationCue[];
+  sourceLanguage: string;
+  targetLanguage: string;
+  /** Optional context from previous batch for better translation consistency */
+  context?: {
+    previousCues?: Array<{
+      original: string;
+      translated: string;
+    }>;
+  };
+  /** Force a specific provider (e.g., 'google-translate' for quick Phase 1 translation) */
+  forceProvider?: 'google-translate';
+}): Promise<{ cues: TranslatedBatchCue[]; context?: { previousCues?: Array<{ original: string; translated: string }> } }> {
+  const message: TranslateBatchMessage = {
+    type: 'TRANSLATE_BATCH',
+    payload: params,
+    requestId: generateRequestId(),
+  };
+
+  const response = await sendMessage<TranslateBatchResponse>(message);
+  if (!response.success || !response.data) {
+    throw new Error(response.error?.message || 'Batch translation failed');
   }
   return response.data;
 }

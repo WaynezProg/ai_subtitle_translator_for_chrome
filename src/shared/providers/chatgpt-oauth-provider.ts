@@ -28,6 +28,8 @@ import {
   storeChatGPTTokens,
   clearChatGPTTokens,
   launchChatGPTOAuthFlow,
+  getStoredChatGPTTokens,
+  refreshChatGPTToken,
   type ChatGPTOAuthTokens,
 } from './chatgpt-oauth';
 
@@ -37,6 +39,8 @@ import {
 
 // ChatGPT OAuth tokens work with ChatGPT backend-api (Codex endpoint)
 // Reference: opencode-openai-codex-auth uses chatgpt.com/backend-api
+// Note: Both chatgpt.com and chat.openai.com work, but chatgpt.com is preferred for OAuth tokens
+// The /conversation endpoint is the web UI endpoint, not the official /v1/responses API
 const CHATGPT_BACKEND_API = 'https://chatgpt.com/backend-api';
 
 // ============================================================================
@@ -164,12 +168,15 @@ export class ChatGPTOAuthProvider implements TranslationProvider {
    * Translate subtitle cues
    */
   async translate(request: TranslationRequest): Promise<TranslationResult> {
+    // Get fresh token right before API call to ensure it's still valid
+    // Token may expire between provider creation and actual API call
     const token = await this.ensureValidToken();
     
     // Build translation prompt
     const prompt = this.buildTranslationPrompt(request);
     
     // Send message and get response using OpenAI API
+    // sendChatCompletion will handle token refresh and retry if needed
     const response = await this.sendChatCompletion(token, prompt);
     
     // Parse response into cues
@@ -202,10 +209,13 @@ export class ChatGPTOAuthProvider implements TranslationProvider {
     request: TranslationRequest,
     onProgress: (progress: StreamProgress) => void
   ): Promise<TranslationResult> {
+    // Get fresh token right before API call to ensure it's still valid
+    // Token may expire between provider creation and actual API call
     const token = await this.ensureValidToken();
     const prompt = this.buildTranslationPrompt(request);
     
     // For streaming, we'll use the SSE endpoint
+    // streamChatCompletion will handle token refresh and retry if needed
     let fullResponse = '';
     let lastProgress = 0;
     
@@ -279,12 +289,15 @@ export class ChatGPTOAuthProvider implements TranslationProvider {
   // ============================================================================
   
   private async ensureValidToken(): Promise<string> {
+    console.log('[ChatGPTOAuthProvider] ensureValidToken called...');
     const token = await getValidChatGPTToken();
     
     if (!token) {
+      console.error('[ChatGPTOAuthProvider] getValidChatGPTToken returned null - no valid token available');
       throw this.createError('AUTHENTICATION_FAILED', 'Not authenticated. Please log in with ChatGPT.');
     }
     
+    console.log('[ChatGPTOAuthProvider] Got valid token (first 20 chars):', token.substring(0, 20) + '...');
     this.accessToken = token;
     return token;
   }
@@ -292,42 +305,142 @@ export class ChatGPTOAuthProvider implements TranslationProvider {
   /**
    * Send a chat completion request using ChatGPT backend-api
    * Uses the conversation endpoint which supports the OAuth token
+   * Automatically refreshes token if expired (401/403)
+   * 
+   * Reference: opencode-openai-codex-auth pattern
+   * Uses ChatGPT web UI's conversation endpoint format
    */
-  private async sendChatCompletion(token: string, prompt: string): Promise<string> {
+  private async sendChatCompletion(token: string, prompt: string, retryCount = 0): Promise<string> {
     // Generate unique IDs for the conversation
     const messageId = this.generateUUID();
     const parentMessageId = this.generateUUID();
 
-    const response = await fetch(`${CHATGPT_BACKEND_API}/conversation`, {
+    const requestBody = {
+      action: 'next',
+      messages: [
+        {
+          id: messageId,
+          author: { role: 'user' },
+          content: {
+            content_type: 'text',
+            parts: [prompt],
+          },
+        },
+      ],
+      parent_message_id: parentMessageId,
+      model: this.currentModel,
+      timezone_offset_min: new Date().getTimezoneOffset(),
+      history_and_training_disabled: true,
+    };
+
+    const url = `${CHATGPT_BACKEND_API}/conversation`;
+    console.log(`[ChatGPTOAuthProvider] Sending request to ${url}`, {
+      model: this.currentModel,
+      messageLength: prompt.length,
+      retryCount,
+      hasToken: !!token,
+      messageId,
+      parentMessageId,
+      requestBody: {
+        action: requestBody.action,
+        model: requestBody.model,
+        messageCount: requestBody.messages.length,
+      },
+    });
+
+    const response = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${token}`,
+        'Accept': 'text/event-stream',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
       },
-      body: JSON.stringify({
-        action: 'next',
-        messages: [
-          {
-            id: messageId,
-            author: { role: 'user' },
-            content: {
-              content_type: 'text',
-              parts: [prompt],
-            },
-          },
-        ],
-        parent_message_id: parentMessageId,
-        model: this.currentModel,
-        timezone_offset_min: new Date().getTimezoneOffset(),
-        history_and_training_disabled: true,
-      }),
+      body: JSON.stringify(requestBody),
     });
+
+    console.log(`[ChatGPTOAuthProvider] Response received: status=${response.status}, ok=${response.ok}, headers=${JSON.stringify(Object.fromEntries(response.headers.entries()))}`);
 
     if (!response.ok) {
       const errorText = await response.text();
+      console.error(`[ChatGPTOAuthProvider] API error: status=${response.status}, retryCount=${retryCount}`, {
+        error: errorText.substring(0, 500),
+        url,
+        requestBody: {
+          action: requestBody.action,
+          model: requestBody.model,
+        },
+      });
 
+      // Check for "Unusual activity" error - this is NOT a token issue
+      // Do NOT clear tokens or retry in this case
+      if (errorText.includes('Unusual activity') || errorText.includes('unusual activity')) {
+        console.error('[ChatGPTOAuthProvider] ChatGPT detected unusual activity - this is a rate limit/security issue, not a token issue');
+        throw this.createError(
+          'RATE_LIMITED',
+          'ChatGPT 偵測到異常活動，請稍後再試。這可能是因為短時間內發送太多請求。'
+        );
+      }
+
+      // Check for other known non-token errors
+      if (errorText.includes('capacity') || errorText.includes('overloaded')) {
+        throw this.createError('SERVICE_UNAVAILABLE', 'ChatGPT 服務目前過載，請稍後再試。');
+      }
+
+      // Handle token expiration - try to refresh and retry once
+      // Reference: opencode pattern - refresh on 401/403 and retry
+      // Only do this for actual auth errors, not for "unusual activity"
+      if ((response.status === 401 || response.status === 403) && retryCount === 0) {
+        // Check if it's actually an auth error (not unusual activity which we handled above)
+        const isAuthError = errorText.includes('unauthorized') || 
+                           errorText.includes('invalid_token') ||
+                           errorText.includes('token') ||
+                           errorText.includes('authentication') ||
+                           errorText.includes('expired');
+        
+        if (isAuthError) {
+          console.log('[ChatGPTOAuthProvider] Token expired (401/403), attempting refresh...');
+          
+          try {
+            // Get stored tokens
+            const storedTokens = await getStoredChatGPTTokens();
+            if (!storedTokens?.refreshToken) {
+              console.warn('[ChatGPTOAuthProvider] No refresh token available, cannot refresh');
+              throw this.createError('AUTHENTICATION_FAILED', 'TOKEN_EXPIRED: No refresh token available. Please re-authenticate.');
+            }
+            
+            // Refresh token using refresh token
+            console.log('[ChatGPTOAuthProvider] Refreshing token...');
+            const newTokens = await refreshChatGPTToken(storedTokens.refreshToken);
+            await storeChatGPTTokens(newTokens);
+            
+            // Update instance token
+            this.accessToken = newTokens.accessToken;
+            
+            console.log('[ChatGPTOAuthProvider] Token refreshed successfully, retrying request with new token...');
+            
+            // Retry with new token (increment retryCount to prevent infinite loops)
+            return await this.sendChatCompletion(newTokens.accessToken, prompt, retryCount + 1);
+          } catch (refreshError) {
+            console.error('[ChatGPTOAuthProvider] Token refresh failed:', refreshError);
+            // If refresh failed, clear tokens to force re-authentication
+            await clearChatGPTTokens();
+            throw this.createError('AUTHENTICATION_FAILED', 'TOKEN_EXPIRED: Refresh failed. Please re-authenticate.');
+          }
+        } else {
+          // 403 but not an auth error - don't retry or clear tokens
+          console.warn('[ChatGPTOAuthProvider] Got 403 but not an auth error, not retrying');
+          throw this.createError('SERVICE_UNAVAILABLE', `ChatGPT 拒絕請求 (${response.status}): ${errorText.substring(0, 200)}`);
+        }
+      }
+
+      // If we get 401/403 after retry, or if retryCount > 0, token refresh didn't help
       if (response.status === 401 || response.status === 403) {
-        throw this.createError('AUTHENTICATION_FAILED', 'TOKEN_EXPIRED');
+        if (retryCount > 0) {
+          console.error('[ChatGPTOAuthProvider] Token still invalid after refresh, authentication required');
+        }
+        // Don't clear tokens here - the issue might be temporary
+        throw this.createError('AUTHENTICATION_FAILED', `TOKEN_EXPIRED: HTTP ${response.status}`);
       }
 
       throw this.createError('SERVICE_UNAVAILABLE', `ChatGPT API error: ${response.status} - ${errorText}`);
@@ -339,6 +452,10 @@ export class ChatGPTOAuthProvider implements TranslationProvider {
 
   /**
    * Parse Server-Sent Events response from ChatGPT backend-api
+   * ChatGPT may return errors in SSE stream even with 200 status code
+   * 
+   * Reference: ChatGPT backend-api returns SSE stream with data: lines
+   * Each line contains JSON with message content or error information
    */
   private async parseSSEResponse(response: Response): Promise<string> {
     const reader = response.body?.getReader();
@@ -348,39 +465,116 @@ export class ChatGPTOAuthProvider implements TranslationProvider {
 
     const decoder = new TextDecoder();
     let fullContent = '';
+    let hasError = false;
+    let errorMessage = '';
+    let eventCount = 0;
+    let lastMessageStatus: string | undefined;
+
+    console.log('[ChatGPTOAuthProvider] Starting to parse SSE response...');
 
     while (true) {
       const { done, value } = await reader.read();
-      if (done) break;
+      if (done) {
+        console.log(`[ChatGPTOAuthProvider] SSE stream ended. Parsed ${eventCount} events, content length: ${fullContent.length}`);
+        break;
+      }
 
-      const text = decoder.decode(value);
+      const text = decoder.decode(value, { stream: true });
       const lines = text.split('\n');
 
       for (const line of lines) {
         if (line.startsWith('data: ')) {
           const data = line.slice(6).trim();
-          if (data === '[DONE]') continue;
+          if (data === '[DONE]') {
+            console.log('[ChatGPTOAuthProvider] Received [DONE] signal');
+            continue;
+          }
 
           try {
             const event = JSON.parse(data) as {
+              error?: {
+                message?: string;
+                code?: string;
+                type?: string;
+              };
               message?: {
                 content?: {
                   parts?: string[];
                 };
                 status?: string;
+                metadata?: {
+                  finish_details?: {
+                    type?: string;
+                  };
+                };
               };
             };
+
+            eventCount++;
+
+            // Check for error in response (ChatGPT may return errors in SSE even with 200 status)
+            if (event.error) {
+              hasError = true;
+              errorMessage = event.error.message || event.error.code || 'Unknown error';
+              console.error('[ChatGPTOAuthProvider] Error in SSE response:', {
+                error: event.error,
+                eventNumber: eventCount,
+              });
+              // Continue parsing to get full error message, but mark as error
+            }
+
+            // Check message status for errors
+            if (event.message?.status) {
+              lastMessageStatus = event.message.status;
+              if (event.message.status !== 'finished_successfully' && event.message.status !== 'in_progress') {
+                hasError = true;
+                errorMessage = `Message status: ${event.message.status}`;
+                console.warn('[ChatGPTOAuthProvider] Message status indicates error:', {
+                  status: event.message.status,
+                  eventNumber: eventCount,
+                });
+              }
+            }
 
             // Get the full content from the message
             const parts = event.message?.content?.parts;
             if (parts && parts.length > 0) {
-              fullContent = parts.join('');
+              const newContent = parts.join('');
+              if (newContent.length > fullContent.length) {
+                fullContent = newContent;
+              }
             }
-          } catch {
-            // Skip invalid JSON
+          } catch (parseError) {
+            // Skip invalid JSON, but log for debugging
+            console.warn('[ChatGPTOAuthProvider] Failed to parse SSE line:', {
+              line: line.substring(0, 200),
+              error: parseError instanceof Error ? parseError.message : 'Unknown parse error',
+            });
           }
         }
       }
+    }
+
+    console.log('[ChatGPTOAuthProvider] SSE parsing complete:', {
+      eventCount,
+      contentLength: fullContent.length,
+      lastStatus: lastMessageStatus,
+      hasError,
+    });
+
+    // If we detected an error, throw it even though HTTP status was 200
+    if (hasError) {
+      console.error('[ChatGPTOAuthProvider] Error detected in SSE response:', errorMessage);
+      throw this.createError('SERVICE_UNAVAILABLE', `ChatGPT API error: ${errorMessage}`);
+    }
+
+    // If no content was received, that's also an error
+    if (!fullContent || fullContent.trim().length === 0) {
+      console.warn('[ChatGPTOAuthProvider] Empty response from ChatGPT API', {
+        eventCount,
+        lastStatus: lastMessageStatus,
+      });
+      throw this.createError('SERVICE_UNAVAILABLE', 'Empty response from ChatGPT API');
     }
 
     return fullContent;
@@ -400,42 +594,121 @@ export class ChatGPTOAuthProvider implements TranslationProvider {
   /**
    * Stream chat completion using ChatGPT backend-api
    * ChatGPT backend-api streams by default via SSE
+   * Automatically refreshes token if expired (401/403)
+   * 
+   * Reference: opencode-openai-codex-auth pattern
+   * Uses ChatGPT web UI's conversation endpoint format
    */
   private async streamChatCompletion(
     token: string,
     prompt: string,
-    onChunk: (chunk: string) => void
+    onChunk: (chunk: string) => void,
+    retryCount = 0
   ): Promise<void> {
     const messageId = this.generateUUID();
     const parentMessageId = this.generateUUID();
 
-    const response = await fetch(`${CHATGPT_BACKEND_API}/conversation`, {
+    // Request body format based on ChatGPT backend-api conversation endpoint
+    // Reference: ChatGPT web UI format - uses 'author' with 'role' nested
+    // Note: ChatGPT backend-api uses 'author: { role: ... }' format, not 'role' directly
+    const requestBody = {
+      action: 'next',
+      messages: [
+        {
+          id: messageId,
+          author: { role: 'user' }, // ChatGPT backend-api uses nested author.role format
+          content: {
+            content_type: 'text',
+            parts: [prompt],
+          },
+        },
+      ],
+      parent_message_id: parentMessageId,
+      model: this.currentModel,
+      timezone_offset_min: new Date().getTimezoneOffset(),
+      history_and_training_disabled: true,
+    };
+
+    const url = `${CHATGPT_BACKEND_API}/conversation`;
+    console.log(`[ChatGPTOAuthProvider] Streaming request to ${url}`, {
+      model: this.currentModel,
+      messageLength: prompt.length,
+      retryCount,
+      hasToken: !!token,
+      messageId,
+      parentMessageId,
+      requestBody: {
+        action: requestBody.action,
+        model: requestBody.model,
+        messageCount: requestBody.messages.length,
+      },
+    });
+
+    const response = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${token}`,
+        'Accept': 'text/event-stream',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
       },
-      body: JSON.stringify({
-        action: 'next',
-        messages: [
-          {
-            id: messageId,
-            author: { role: 'user' },
-            content: {
-              content_type: 'text',
-              parts: [prompt],
-            },
-          },
-        ],
-        parent_message_id: parentMessageId,
-        model: this.currentModel,
-        timezone_offset_min: new Date().getTimezoneOffset(),
-        history_and_training_disabled: true,
-      }),
+      body: JSON.stringify(requestBody),
     });
+
+    console.log(`[ChatGPTOAuthProvider] Stream response received: status=${response.status}, ok=${response.ok}`);
 
     if (!response.ok) {
       const errorText = await response.text();
+      console.error(`[ChatGPTOAuthProvider] Stream API error: status=${response.status}, retryCount=${retryCount}`, {
+        error: errorText.substring(0, 500),
+        url,
+        requestBody: {
+          action: requestBody.action,
+          model: requestBody.model,
+        },
+      });
+
+      // Handle token expiration - try to refresh and retry once
+      // Reference: opencode pattern - refresh on 401/403 and retry
+      if ((response.status === 401 || response.status === 403) && retryCount === 0) {
+        console.log('[ChatGPTOAuthProvider] Token expired during streaming (401/403), attempting refresh...');
+        
+        try {
+          // Get stored tokens
+          const storedTokens = await getStoredChatGPTTokens();
+          if (!storedTokens?.refreshToken) {
+            console.warn('[ChatGPTOAuthProvider] No refresh token available, cannot refresh');
+            throw this.createError('AUTHENTICATION_FAILED', 'TOKEN_EXPIRED: No refresh token available. Please re-authenticate.');
+          }
+          
+          // Refresh token using refresh token
+          console.log('[ChatGPTOAuthProvider] Refreshing token...');
+          const newTokens = await refreshChatGPTToken(storedTokens.refreshToken);
+          await storeChatGPTTokens(newTokens);
+          
+          // Update instance token
+          this.accessToken = newTokens.accessToken;
+          
+          console.log('[ChatGPTOAuthProvider] Token refreshed successfully, retrying stream request with new token...');
+          
+          // Retry with new token (increment retryCount to prevent infinite loops)
+          return await this.streamChatCompletion(newTokens.accessToken, prompt, onChunk, retryCount + 1);
+        } catch (refreshError) {
+          console.error('[ChatGPTOAuthProvider] Token refresh failed:', refreshError);
+          // If refresh failed, clear tokens to force re-authentication
+          await clearChatGPTTokens();
+          throw this.createError('AUTHENTICATION_FAILED', 'TOKEN_EXPIRED: Refresh failed. Please re-authenticate.');
+        }
+      }
+
+      // If we get 401/403 after retry, or if retryCount > 0, token refresh didn't help
+      if (response.status === 401 || response.status === 403) {
+        if (retryCount > 0) {
+          console.error('[ChatGPTOAuthProvider] Token still invalid after refresh, authentication required');
+        }
+        throw this.createError('AUTHENTICATION_FAILED', `TOKEN_EXPIRED: HTTP ${response.status}`);
+      }
+
       throw this.createError('SERVICE_UNAVAILABLE', `API error: ${errorText}`);
     }
 
@@ -461,12 +734,31 @@ export class ChatGPTOAuthProvider implements TranslationProvider {
 
           try {
             const event = JSON.parse(data) as {
+              error?: {
+                message?: string;
+                code?: string;
+                type?: string;
+              };
               message?: {
                 content?: {
                   parts?: string[];
                 };
+                status?: string;
               };
             };
+
+            // Check for error in response (ChatGPT may return errors in SSE even with 200 status)
+            if (event.error) {
+              const errorMsg = event.error.message || event.error.code || 'Unknown error';
+              console.error('[ChatGPTOAuthProvider] Error in SSE stream:', event.error);
+              throw this.createError('SERVICE_UNAVAILABLE', `ChatGPT API error: ${errorMsg}`);
+            }
+
+            // Check message status for errors
+            if (event.message?.status && event.message.status !== 'finished_successfully') {
+              console.warn('[ChatGPTOAuthProvider] Message status indicates error:', event.message.status);
+              throw this.createError('SERVICE_UNAVAILABLE', `ChatGPT API error: Message status ${event.message.status}`);
+            }
 
             const parts = event.message?.content?.parts;
             if (parts && parts.length > 0) {
@@ -478,8 +770,13 @@ export class ChatGPTOAuthProvider implements TranslationProvider {
                 lastContent = newContent;
               }
             }
-          } catch {
-            // Skip invalid JSON
+          } catch (parseError) {
+            // If it's a ProviderError, re-throw it
+            if (parseError instanceof Error && 'code' in parseError) {
+              throw parseError;
+            }
+            // Otherwise, skip invalid JSON but log for debugging
+            console.warn('[ChatGPTOAuthProvider] Failed to parse SSE line:', line.substring(0, 100));
           }
         }
       }
@@ -530,20 +827,75 @@ IMPORTANT RULES:
   }
   
   private parseTranslationResponse(response: string, originalCues: TranslationRequest['cues']): TranslatedCue[] {
+    // Check if response contains error indicators
+    const errorIndicators = [
+      /error/i,
+      /failed/i,
+      /invalid/i,
+      /unauthorized/i,
+      /forbidden/i,
+      /rate limit/i,
+      /quota/i,
+      /exceeded/i,
+    ];
+    
+    const isErrorResponse = errorIndicators.some(pattern => pattern.test(response));
+    if (isErrorResponse && !response.includes('[') && !response.includes('{')) {
+      // Response looks like an error message, not JSON
+      console.error('[ChatGPTOAuthProvider] Response appears to be an error:', response.substring(0, 200));
+      throw this.createError('SERVICE_UNAVAILABLE', `ChatGPT API returned error: ${response.substring(0, 200)}`);
+    }
+    
     // Extract JSON from response
     const jsonMatch = response.match(/\[[\s\S]*\]/);
     if (!jsonMatch) {
+      // Check if response is empty or just whitespace
+      if (!response.trim() || response.trim().length === 0) {
+        console.error('[ChatGPTOAuthProvider] Empty response from ChatGPT');
+        throw this.createError('SERVICE_UNAVAILABLE', 'Empty response from ChatGPT API');
+      }
+      
       // Fallback: Try to parse line by line
+      console.warn('[ChatGPTOAuthProvider] No JSON array found in response, using fallback parsing');
       return this.parseLineByLine(response, originalCues);
     }
     
     try {
       const parsed = JSON.parse(jsonMatch[0]) as Array<{ index: number; text: string }>;
+      
+      // Validate parsed result
+      if (!Array.isArray(parsed)) {
+        console.error('[ChatGPTOAuthProvider] Parsed response is not an array:', typeof parsed);
+        throw this.createError('SERVICE_UNAVAILABLE', 'Invalid response format from ChatGPT API');
+      }
+      
+      // Check if we got the expected number of cues
+      if (parsed.length !== originalCues.length) {
+        console.warn(`[ChatGPTOAuthProvider] Response has ${parsed.length} cues, expected ${originalCues.length}`);
+      }
+      
+      // Validate each item has required fields
+      for (const item of parsed) {
+        if (typeof item.index !== 'number' || typeof item.text !== 'string') {
+          console.error('[ChatGPTOAuthProvider] Invalid cue format:', item);
+          throw this.createError('SERVICE_UNAVAILABLE', 'Invalid response format from ChatGPT API');
+        }
+      }
+      
       return parsed.map(item => ({
         index: item.index,
         translatedText: item.text,
       }));
-    } catch {
+    } catch (parseError) {
+      // If it's a ProviderError, re-throw it
+      if (parseError instanceof Error && 'code' in parseError) {
+        throw parseError;
+      }
+      
+      console.error('[ChatGPTOAuthProvider] Failed to parse JSON response:', parseError);
+      console.warn('[ChatGPTOAuthProvider] Response content:', response.substring(0, 500));
+      
+      // Fallback: Try to parse line by line
       return this.parseLineByLine(response, originalCues);
     }
   }

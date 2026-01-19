@@ -118,6 +118,11 @@ export async function completeChatGPTOAuth(
  * Refresh the access token using the refresh token
  */
 export async function refreshChatGPTToken(refreshToken: string): Promise<ChatGPTOAuthTokens> {
+  console.log('[ChatGPTOAuth] Attempting token refresh...');
+  console.log('[ChatGPTOAuth] Token URL:', CHATGPT_OAUTH_CONFIG.tokenUrl);
+  console.log('[ChatGPTOAuth] Client ID:', CHATGPT_OAUTH_CONFIG.clientId);
+  console.log('[ChatGPTOAuth] Refresh token (first 20 chars):', refreshToken.substring(0, 20) + '...');
+  
   const response = await fetch(CHATGPT_OAUTH_CONFIG.tokenUrl, {
     method: 'POST',
     headers: {
@@ -130,9 +135,13 @@ export async function refreshChatGPTToken(refreshToken: string): Promise<ChatGPT
     }),
   });
   
+  console.log('[ChatGPTOAuth] Refresh response status:', response.status);
+  
   if (!response.ok) {
     const error = await response.text();
-    throw new Error(`Token refresh failed: ${error}`);
+    console.error('[ChatGPTOAuth] Refresh failed with status:', response.status);
+    console.error('[ChatGPTOAuth] Refresh error response:', error);
+    throw new Error(`Token refresh failed (${response.status}): ${error}`);
   }
   
   const data = await response.json() as {
@@ -205,11 +214,21 @@ export async function validateChatGPTToken(accessToken: string): Promise<boolean
 
 /**
  * Check if the token is expired or about to expire (within 5 minutes)
+ * 
+ * Following opencode pattern:
+ * - If expiresAt is not set, return 'unknown' to indicate validation is needed
+ * - This allows the caller to decide whether to validate or refresh
  */
-export function isChatGPTTokenExpired(expiresAt?: string): boolean {
-  if (!expiresAt) return false;
+export function isChatGPTTokenExpired(expiresAt?: string): boolean | 'unknown' {
+  // If no expiration time is set, we can't determine expiration locally
+  // Return 'unknown' to signal that validation should be attempted
+  if (!expiresAt) return 'unknown';
   
   const expirationTime = new Date(expiresAt).getTime();
+  
+  // Check for invalid date
+  if (isNaN(expirationTime)) return 'unknown';
+  
   const bufferTime = 5 * 60 * 1000; // 5 minutes buffer
   
   return Date.now() >= expirationTime - bufferTime;
@@ -302,33 +321,72 @@ export async function clearChatGPTTokens(): Promise<void> {
 
 /**
  * Get a valid access token, refreshing if necessary
+ * 
+ * Reference: opencode-openai-codex-auth pattern
+ * - Prioritize local expiration check to avoid unnecessary server validation
+ * - Server validation adds latency and may fail even with valid tokens
+ * - If expiresAt is unknown, return token directly (let API call validate)
+ * - If API call fails with 401/403, the provider will handle refresh and retry
  */
 export async function getValidChatGPTToken(): Promise<string | null> {
+  console.log('[ChatGPTOAuth] getValidChatGPTToken called...');
   const tokens = await getStoredChatGPTTokens();
   
   if (!tokens) {
+    console.warn('[ChatGPTOAuth] No tokens stored in chrome.storage');
     return null;
   }
   
-  // Check if token is expired
-  if (isChatGPTTokenExpired(tokens.expiresAt)) {
-    if (!tokens.refreshToken) {
-      // No refresh token, need to re-authenticate
-      await clearChatGPTTokens();
-      return null;
-    }
-    
-    try {
-      // Refresh the token
-      const newTokens = await refreshChatGPTToken(tokens.refreshToken);
-      await storeChatGPTTokens(newTokens);
-      return newTokens.accessToken;
-    } catch {
-      // Refresh failed, clear tokens
-      await clearChatGPTTokens();
-      return null;
-    }
+  console.log('[ChatGPTOAuth] Found stored tokens:', {
+    hasAccessToken: !!tokens.accessToken,
+    hasRefreshToken: !!tokens.refreshToken,
+    expiresAt: tokens.expiresAt,
+    accessTokenPrefix: tokens.accessToken?.substring(0, 20) + '...',
+  });
+  
+  // Check if token is expired based on stored expiration time
+  const expiredStatus = isChatGPTTokenExpired(tokens.expiresAt);
+  console.log('[ChatGPTOAuth] Token expiration status:', expiredStatus);
+  
+  // If expiration status is unknown (no expiresAt set), return token directly
+  // Let the API call determine if it's valid - provider will handle 401/403 retry
+  if (expiredStatus === 'unknown') {
+    console.log('[ChatGPTOAuth] No expiresAt set, returning token (API call will validate)');
+    return tokens.accessToken;
   }
   
-  return tokens.accessToken;
+  // Token is not expired locally, return it directly
+  if (expiredStatus === false) {
+    console.log('[ChatGPTOAuth] Token not expired, returning directly');
+    return tokens.accessToken;
+  }
+  
+  // Token is expired, attempt refresh
+  console.log('[ChatGPTOAuth] Token expired based on expiresAt, attempting refresh...');
+  return await tryRefreshToken(tokens);
+}
+
+/**
+ * Try to refresh the token, return null if failed
+ */
+async function tryRefreshToken(tokens: ChatGPTOAuthTokens): Promise<string | null> {
+  if (!tokens.refreshToken) {
+    // No refresh token, need to re-authenticate
+    console.warn('[ChatGPTOAuth] No refresh token available, clearing tokens');
+    await clearChatGPTTokens();
+    return null;
+  }
+  
+  try {
+    // Refresh the token
+    const newTokens = await refreshChatGPTToken(tokens.refreshToken);
+    await storeChatGPTTokens(newTokens);
+    console.log('[ChatGPTOAuth] Token refreshed successfully');
+    return newTokens.accessToken;
+  } catch (error) {
+    // Refresh failed, clear tokens
+    console.error('[ChatGPTOAuth] Token refresh failed:', error);
+    await clearChatGPTTokens();
+    return null;
+  }
 }

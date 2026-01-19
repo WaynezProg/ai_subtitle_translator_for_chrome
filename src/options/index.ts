@@ -195,11 +195,11 @@ async function handleOAuthLogin(): Promise<void> {
     const providerName = providerType === 'claude-subscription' ? 'Claude' : 'ChatGPT';
 
     if (providerType === 'claude-subscription') {
-      const tokens = await launchClaudeOAuthFlow();
+      await launchClaudeOAuthFlow();
       console.log('[Options] Claude OAuth success, tokens received');
       showNotification(`${providerName} 登入成功！`);
     } else {
-      const tokens = await launchChatGPTOAuthFlow();
+      await launchChatGPTOAuthFlow();
       console.log('[Options] ChatGPT OAuth success, tokens received');
       showNotification(`${providerName} 登入成功！`);
     }
@@ -711,12 +711,6 @@ async function validateApiKey(): Promise<void> {
   const keyStatusEl = document.getElementById('key-status');
   const validateBtn = document.getElementById('validate-key') as HTMLButtonElement;
   
-  const apiKey = apiKeyInput?.value.trim();
-  if (!apiKey) {
-    showNotification('請輸入 API Key', 'error');
-    return;
-  }
-  
   // Get current provider type
   const providerRadio = document.querySelector('input[name="provider"]:checked') as HTMLInputElement;
   const providerType = providerRadio?.value as ProviderType;
@@ -724,6 +718,21 @@ async function validateApiKey(): Promise<void> {
   if (!providerType || !providerType.includes('api')) {
     showNotification('請先選擇 API 服務', 'error');
     return;
+  }
+  
+  // Get API key from input, or fall back to stored key if input is empty
+  let apiKey = apiKeyInput?.value.trim();
+  
+  if (!apiKey) {
+    // Try to get the stored API key
+    const authProvider = await getAuthProvider(providerType);
+    if (authProvider?.apiKey) {
+      apiKey = authProvider.apiKey;
+      console.log('[Options] Using stored API key for validation');
+    } else {
+      showNotification('請輸入 API Key', 'error');
+      return;
+    }
   }
   
   // Update UI to show loading
@@ -752,6 +761,16 @@ async function validateApiKey(): Promise<void> {
         keyStatusEl.textContent = '驗證成功';
       }
       showNotification('API Key 驗證成功');
+      
+      // Also update the stored status to 'valid'
+      const authProvider = await getAuthProvider(providerType);
+      if (authProvider?.apiKey) {
+        await saveProviderCredentials(
+          providerType,
+          authProvider.apiKey,
+          authProvider.selectedModel
+        );
+      }
     } else {
       if (keyStatusEl) {
         keyStatusEl.className = 'key-status invalid';
