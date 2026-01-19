@@ -62,6 +62,7 @@
       "css": [
         "styles/floating-button.css",
         "styles/translate-button.css",
+        "styles/settings-panel.css",
         "styles/error-display.css",
         "styles/progress-overlay.css"
       ],

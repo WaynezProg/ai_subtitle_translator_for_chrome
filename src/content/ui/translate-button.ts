@@ -3,8 +3,10 @@
  * 
  * Injects a translate button into the video player controls.
  * Supports different platforms with platform-specific styling.
+ * Now includes integrated settings panel trigger.
  * 
  * @see FR-024: Translate Button Requirements
+ * @see specs/player-ui - Translate Button Integration
  */
 
 // ============================================================================
@@ -14,6 +16,9 @@
 export interface TranslateButtonOptions {
   /** Button click handler */
   onClick: () => void | Promise<void>;
+  
+  /** Settings button click handler */
+  onSettingsClick?: () => void;
   
   /** Platform for styling */
   platform: 'youtube' | 'netflix' | 'disney' | 'prime';
@@ -51,6 +56,9 @@ export interface TranslateButton {
   
   /** Show/hide local model indicator */
   setLocalMode(isLocal: boolean): void;
+  
+  /** Get the container element (for panel mounting) */
+  getContainer(): HTMLElement | null;
 }
 
 // ============================================================================
@@ -84,7 +92,7 @@ const STATE_TITLES: Record<TranslateButtonState, string> = {
 // Note: CSS is loaded via manifest.json content_scripts for Trusted Types compliance
 
 export function createTranslateButton(options: TranslateButtonOptions): TranslateButton {
-  const { onClick, platform } = options;
+  const { onClick, onSettingsClick, platform } = options;
   let state: TranslateButtonState = options.state || 'idle';
   let progress = 0;
   let isLocalMode = false;
@@ -95,7 +103,7 @@ export function createTranslateButton(options: TranslateButtonOptions): Translat
   /**
    * Create button elements using DOM APIs (no innerHTML for Trusted Types compliance)
    */
-  function createElements(): { container: HTMLDivElement; button: HTMLButtonElement } {
+  function createElements(): { container: HTMLDivElement; button: HTMLButtonElement; settingsBtn: HTMLButtonElement } {
     const container = document.createElement('div');
     container.className = CONTAINER_CLASS;
     
@@ -136,7 +144,29 @@ export function createTranslateButton(options: TranslateButtonOptions): Translat
     });
     
     container.appendChild(button);
-    return { container, button };
+    
+    // Create settings button
+    const settingsBtn = document.createElement('button');
+    settingsBtn.className = 'ai-subtitle-settings-btn';
+    settingsBtn.type = 'button';
+    settingsBtn.title = '字幕設定';
+    
+    const settingsIcon = document.createElement('span');
+    settingsIcon.className = 'settings-icon';
+    settingsIcon.textContent = '⚙️';
+    settingsBtn.appendChild(settingsIcon);
+    
+    settingsBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (onSettingsClick) {
+        onSettingsClick();
+      }
+    });
+    
+    container.appendChild(settingsBtn);
+    
+    return { container, button, settingsBtn };
   }
   
   /**
@@ -149,8 +179,11 @@ export function createTranslateButton(options: TranslateButtonOptions): Translat
         return document.querySelector('.ytp-right-controls');
       
       case 'netflix':
-        // Netflix controls
-        return document.querySelector('.PlayerControlsNeo__button-control-row');
+        // Netflix controls - try multiple selectors as Netflix updates frequently
+        return document.querySelector('.PlayerControlsNeo__button-control-row') ||
+               document.querySelector('[data-uia="controls-standard"]') ||
+               document.querySelector('.watch-video--bottom-controls-container') ||
+               document.querySelector('.ltr-1bt0omd'); // Netflix bottom controls class
       
       case 'disney':
         // Disney+ controls
@@ -270,6 +303,10 @@ export function createTranslateButton(options: TranslateButtonOptions): Translat
     setLocalMode(isLocal: boolean): void {
       isLocalMode = isLocal;
       updateButton();
+    },
+    
+    getContainer(): HTMLElement | null {
+      return container;
     },
   };
 }

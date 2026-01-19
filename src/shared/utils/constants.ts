@@ -151,13 +151,13 @@ export const DEFAULT_TARGET_LANGUAGE = 'zh-TW';
 
 export const UI_CONSTANTS = {
   /** Default font size for subtitles */
-  DEFAULT_FONT_SIZE: 18,
+  DEFAULT_FONT_SIZE: 28,
   
   /** Minimum font size */
-  MIN_FONT_SIZE: 12,
+  MIN_FONT_SIZE: 16,
   
   /** Maximum font size */
-  MAX_FONT_SIZE: 36,
+  MAX_FONT_SIZE: 48,
   
   /** Toast notification duration */
   TOAST_DURATION_MS: 3000,

@@ -99,6 +99,51 @@ export interface GetCachedTranslationResponse extends Response<{
 }> {}
 
 /**
+ * Cached translation info for selection UI
+ */
+export interface CachedTranslationInfo {
+  /** Cache key ID */
+  id: string;
+  /** Source language code */
+  sourceLanguage: string;
+  /** Target language code */
+  targetLanguage: string;
+  /** Provider type used */
+  provider: string;
+  /** Model name (if applicable) */
+  model?: string;
+  /** Translation timestamp (ISO 8601) */
+  translatedAt: string;
+  /** Number of translated cues */
+  cueCount: number;
+}
+
+/**
+ * GET_ALL_CACHED_TRANSLATIONS: Query all cached translations for a video
+ * Used by the settings panel to show available cached versions
+ */
+export interface GetAllCachedTranslationsMessage extends Message<'GET_ALL_CACHED_TRANSLATIONS', {
+  platform: Platform;
+  videoId: string;
+}> {}
+
+export interface GetAllCachedTranslationsResponse extends Response<{
+  translations: CachedTranslationInfo[];
+}> {}
+
+/**
+ * LOAD_CACHED_TRANSLATION: Load a specific cached translation by ID
+ */
+export interface LoadCachedTranslationMessage extends Message<'LOAD_CACHED_TRANSLATION', {
+  cacheId: string;
+}> {}
+
+export interface LoadCachedTranslationResponse extends Response<{
+  found: boolean;
+  subtitle?: Subtitle;
+}> {}
+
+/**
  * GET_AUTH_STATUS: Query authentication status
  */
 export interface GetAuthStatusMessage extends Message<'GET_AUTH_STATUS', Record<string, never>> {}
@@ -273,6 +318,8 @@ export type ContentToBackgroundMessage =
   | RequestTranslationMessage
   | CancelTranslationMessage
   | GetCachedTranslationMessage
+  | GetAllCachedTranslationsMessage
+  | LoadCachedTranslationMessage
   | GetAuthStatusMessage
   | TranslateTextMessage
   | TranslateBatchMessage

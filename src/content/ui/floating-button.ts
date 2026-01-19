@@ -13,6 +13,9 @@ export interface FloatingButtonOptions {
   /** Button click handler */
   onClick: () => void | Promise<void>;
 
+  /** Settings button click handler */
+  onSettingsClick?: () => void;
+
   /** Platform for styling */
   platform: 'youtube' | 'netflix' | 'disney' | 'prime';
 
@@ -105,7 +108,7 @@ const STATE_CONFIG: Record<Exclude<FloatingButtonState, 'hidden'>, {
 // Note: CSS is loaded via manifest.json content_scripts for Trusted Types compliance
 
 export function createFloatingButton(options: FloatingButtonOptions): FloatingButton {
-  const { onClick, platform } = options;
+  const { onClick, onSettingsClick, platform } = options;
   let state: FloatingButtonState = options.state || 'idle';
   let progress = 0;
   let container: HTMLDivElement | null = null;
@@ -161,6 +164,20 @@ export function createFloatingButton(options: FloatingButtonOptions): FloatingBu
     
     button.appendChild(progressDiv);
 
+    // Create settings button (gear icon)
+    if (onSettingsClick) {
+      const settingsBtn = document.createElement('button');
+      settingsBtn.className = 'floating-settings';
+      settingsBtn.title = '字幕設定';
+      settingsBtn.textContent = '⚙️';
+      settingsBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onSettingsClick();
+      });
+      button.appendChild(settingsBtn);
+    }
+
     // Create close button
     const closeBtn = document.createElement('button');
     closeBtn.className = 'floating-close';
@@ -171,11 +188,8 @@ export function createFloatingButton(options: FloatingButtonOptions): FloatingBu
     // Main button click
     button.addEventListener('click', (e) => {
       const target = e.target as HTMLElement;
-      if (target.classList.contains('floating-close')) {
-        e.preventDefault();
-        e.stopPropagation();
-        toggleMinimize();
-        return;
+      if (target.classList.contains('floating-close') || target.classList.contains('floating-settings')) {
+        return; // Already handled by their own listeners
       }
 
       e.preventDefault();
@@ -210,7 +224,7 @@ export function createFloatingButton(options: FloatingButtonOptions): FloatingBu
   function findPlayerContainer(): HTMLElement | null {
     const selectors: Record<string, string[]> = {
       youtube: ['.html5-video-player', '#movie_player', '.ytd-player'],
-      netflix: ['.watch-video--player-view', '.VideoContainer'],
+      netflix: ['.watch-video--player-view', '[data-uia="player"]', '.VideoContainer', '.ltr-omkt8s'],
       disney: ['.btm-media-player', '.dss-hls-player'],
       prime: ['.atvwebplayersdk-overlays-container', '.webPlayerContainer'],
     };

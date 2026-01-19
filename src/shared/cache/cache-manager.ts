@@ -15,9 +15,10 @@
 import type { Subtitle } from '../types/subtitle';
 import type { CacheKey, TranslationCache } from '../types/translation';
 import type { ProviderType } from '../types/auth';
+import type { CachedTranslationInfo } from '../types/messages';
 import { L1MemoryCache, l1Cache, type CacheStats as L1CacheStats } from './l1-memory-cache';
 import { L2IndexedDBCache, l2Cache, type L2CacheStats } from './l2-indexeddb-cache';
-import { createCacheKey } from './cache-utils';
+import { createCacheKey, serializeCacheKey } from './cache-utils';
 
 // ============================================================================
 // Types
@@ -290,6 +291,71 @@ export class CacheManager {
       console.error('[CacheManager] L2 getByVideoId failed:', error);
       // Fallback to L1
       return this.l1.getAll().filter(entry => entry.key.videoId === videoId);
+    }
+  }
+  
+  /**
+   * Get all cached translations for a video as info objects (for UI display)
+   * Returns simplified info about each cached translation without the full subtitle content
+   */
+  async getAllCachedTranslationsForVideo(videoId: string): Promise<CachedTranslationInfo[]> {
+    await this.init();
+    
+    try {
+      const entries = await this.getByVideoId(videoId);
+      
+      return entries.map(entry => {
+        // Parse provider and model from providerModel field
+        // Format is typically "provider:model" or just "provider"
+        const [provider, ...modelParts] = entry.key.providerModel.split(':');
+        const model = modelParts.length > 0 ? modelParts.join(':') : undefined;
+        
+        return {
+          id: serializeCacheKey(entry.key),
+          sourceLanguage: entry.key.sourceLanguage,
+          targetLanguage: entry.key.targetLanguage,
+          provider: provider || 'unknown',
+          model,
+          translatedAt: entry.createdAt,
+          cueCount: entry.subtitle.cues?.length || 0,
+        };
+      }).sort((a, b) => 
+        // Sort by most recent first
+        new Date(b.translatedAt).getTime() - new Date(a.translatedAt).getTime()
+      );
+    } catch (error) {
+      console.error('[CacheManager] getAllCachedTranslationsForVideo failed:', error);
+      return [];
+    }
+  }
+  
+  /**
+   * Get a cached translation by its serialized cache ID
+   */
+  async getByCacheId(cacheId: string): Promise<CacheResult> {
+    await this.init();
+    
+    try {
+      // Parse the cache ID back to a key
+      const parts = cacheId.split(':');
+      if (parts.length < 4) {
+        return { subtitle: null, hit: false, source: 'none' };
+      }
+      
+      const [videoId, sourceLanguage, targetLanguage, ...providerParts] = parts;
+      const providerModel = providerParts.join(':');
+      
+      const key: CacheKey = {
+        videoId,
+        sourceLanguage,
+        targetLanguage,
+        providerModel,
+      };
+      
+      return this.get(key);
+    } catch (error) {
+      console.error('[CacheManager] getByCacheId failed:', error);
+      return { subtitle: null, hit: false, source: 'none' };
     }
   }
   

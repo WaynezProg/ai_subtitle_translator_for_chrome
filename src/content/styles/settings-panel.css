@@ -1,0 +1,431 @@
+/**
+ * Settings Panel Styles
+ * AI Subtitle Translator - In-player settings panel
+ */
+
+.ai-subtitle-settings-panel {
+  position: absolute;
+  bottom: 50px;
+  right: 10px;
+  width: 280px;
+  max-height: 400px;
+  overflow-y: auto;
+  background: rgba(28, 28, 28, 0.95);
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 13px;
+  color: #fff;
+  z-index: 2147483640;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(10px);
+  transition: opacity 0.2s ease, visibility 0.2s ease, transform 0.2s ease;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.ai-subtitle-settings-panel.visible {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
+/* Header */
+.settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.settings-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+}
+
+.settings-close-btn {
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.6);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: background 0.15s, color 0.15s;
+}
+
+.settings-close-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+/* Section */
+.settings-section {
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.settings-section:last-child {
+  border-bottom: none;
+}
+
+.section-header {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.7);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 10px;
+}
+
+/* Translate button */
+.translate-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px;
+  background: rgba(33, 150, 243, 0.9);
+  border: none;
+  border-radius: 6px;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.translate-action-btn:hover:not(:disabled) {
+  background: rgba(33, 150, 243, 1);
+}
+
+.translate-action-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.translate-action-btn .btn-icon {
+  font-size: 16px;
+}
+
+/* Cache section */
+.cache-section {
+  margin-top: 10px;
+}
+
+.cache-empty {
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 12px;
+  text-align: center;
+  padding: 8px 0;
+}
+
+.cache-label {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.7);
+  margin-bottom: 6px;
+}
+
+.cache-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cache-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  text-align: left;
+  width: 100%;
+  color: inherit;
+}
+
+.cache-item:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.cache-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cache-lang {
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.cache-provider {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.6);
+  text-transform: capitalize;
+}
+
+.cache-meta {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+/* Settings row */
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.settings-row:last-child {
+  margin-bottom: 0;
+}
+
+.settings-row > label {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.9);
+  flex-shrink: 0;
+}
+
+.settings-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Slider control */
+.slider-control {
+  flex: 1;
+  max-width: 140px;
+}
+
+.slider-control input[type="range"] {
+  flex: 1;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.slider-control input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  background: #fff;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.slider-control input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  background: #fff;
+  border-radius: 50%;
+  cursor: pointer;
+  border: none;
+}
+
+.slider-value {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.7);
+  min-width: 35px;
+  text-align: right;
+}
+
+/* Color control */
+.color-control {
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.color-presets {
+  display: flex;
+  gap: 4px;
+}
+
+.color-preset {
+  width: 22px;
+  height: 22px;
+  border: 2px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: border-color 0.15s, transform 0.15s;
+}
+
+.color-preset:hover {
+  transform: scale(1.1);
+}
+
+.color-preset.active {
+  border-color: rgba(255, 255, 255, 0.8);
+}
+
+.color-custom {
+  width: 70px;
+  padding: 4px 6px;
+  font-size: 11px;
+  font-family: ui-monospace, monospace;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  color: #fff;
+  text-transform: uppercase;
+}
+
+.color-custom:focus {
+  outline: none;
+  border-color: rgba(33, 150, 243, 0.8);
+}
+
+.color-custom.invalid {
+  border-color: rgba(244, 67, 54, 0.8);
+}
+
+/* Select control */
+.settings-control select {
+  padding: 6px 10px;
+  font-size: 12px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  color: #fff;
+  cursor: pointer;
+  min-width: 100px;
+}
+
+.settings-control select:focus {
+  outline: none;
+  border-color: rgba(33, 150, 243, 0.8);
+}
+
+.settings-control select option {
+  background: #333;
+  color: #fff;
+}
+
+/* Toggle switch */
+.bilingual-control {
+  gap: 10px;
+}
+
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 36px;
+  height: 20px;
+  cursor: pointer;
+}
+
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-slider {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 10px;
+  transition: background 0.2s;
+}
+
+.toggle-slider::before {
+  content: '';
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  left: 2px;
+  bottom: 2px;
+  background: #fff;
+  border-radius: 50%;
+  transition: transform 0.2s;
+}
+
+.toggle-switch input:checked + .toggle-slider {
+  background: rgba(33, 150, 243, 0.9);
+}
+
+.toggle-switch input:checked + .toggle-slider::before {
+  transform: translateX(16px);
+}
+
+.bilingual-order {
+  min-width: 80px;
+}
+
+/* Scrollbar styling */
+.ai-subtitle-settings-panel::-webkit-scrollbar {
+  width: 6px;
+}
+
+.ai-subtitle-settings-panel::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.ai-subtitle-settings-panel::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 3px;
+}
+
+.ai-subtitle-settings-panel::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .ai-subtitle-settings-panel {
+    width: 260px;
+    right: 5px;
+    bottom: 50px;
+  }
+}
+
+/* YouTube-specific positioning */
+/* YouTube control bar is shorter, position panel just above it */
+.ytp-right-controls .ai-subtitle-settings-panel {
+  bottom: 45px;
+  right: 0;
+}
+
+/* Netflix-specific positioning */
+/* Netflix controls are at the bottom, panel should appear above them */
+.watch-video--player-view .ai-subtitle-settings-panel,
+[data-uia="player"] .ai-subtitle-settings-panel,
+.VideoContainer .ai-subtitle-settings-panel {
+  position: fixed;
+  bottom: 100px;
+  right: 20px;
+}
+
+/* Disney+ specific positioning */
+.btm-media-client-element .ai-subtitle-settings-panel,
+[data-testid="web-player"] .ai-subtitle-settings-panel {
+  position: fixed;
+  bottom: 80px;
+  right: 20px;
+}
+
+/* Prime Video specific positioning */
+.webPlayerContainer .ai-subtitle-settings-panel,
+[id^="dv-web-player"] .ai-subtitle-settings-panel {
+  position: fixed;
+  bottom: 80px;
+  right: 20px;
+}

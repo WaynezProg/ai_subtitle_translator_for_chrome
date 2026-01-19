@@ -15,6 +15,11 @@ import type {
   CancelTranslationResponse,
   GetCachedTranslationMessage,
   GetCachedTranslationResponse,
+  GetAllCachedTranslationsMessage,
+  GetAllCachedTranslationsResponse,
+  LoadCachedTranslationMessage,
+  LoadCachedTranslationResponse,
+  CachedTranslationInfo,
   GetAuthStatusMessage,
   GetAuthStatusResponse,
   TranslateTextMessage,
@@ -169,6 +174,38 @@ export async function getCachedTranslation(params: {
   
   const response = await sendMessage<GetCachedTranslationResponse>(message);
   return response.data!;
+}
+
+/**
+ * Get all cached translations for a video
+ * Returns info about all cached versions (different providers/languages)
+ */
+export async function getAllCachedTranslations(params: {
+  platform: Platform;
+  videoId: string;
+}): Promise<{ translations: CachedTranslationInfo[] }> {
+  const message: GetAllCachedTranslationsMessage = {
+    type: 'GET_ALL_CACHED_TRANSLATIONS',
+    payload: params,
+    requestId: generateRequestId(),
+  };
+  
+  const response = await sendMessage<GetAllCachedTranslationsResponse>(message);
+  return response.data || { translations: [] };
+}
+
+/**
+ * Load a specific cached translation by its cache ID
+ */
+export async function loadCachedTranslation(cacheId: string): Promise<{ found: boolean; subtitle?: Subtitle }> {
+  const message: LoadCachedTranslationMessage = {
+    type: 'LOAD_CACHED_TRANSLATION',
+    payload: { cacheId },
+    requestId: generateRequestId(),
+  };
+  
+  const response = await sendMessage<LoadCachedTranslationResponse>(message);
+  return response.data || { found: false };
 }
 
 /**

@@ -90,3 +90,46 @@
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }
 }
+
+/* Settings Button */
+.ai-subtitle-settings-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  border-radius: 4px;
+  width: 32px;
+  height: 32px;
+  color: #fff;
+  margin-left: 4px;
+}
+
+.ai-subtitle-settings-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.ai-subtitle-settings-btn:active {
+  transform: scale(0.95);
+}
+
+.ai-subtitle-settings-btn .settings-icon {
+  font-size: 16px;
+  line-height: 1;
+  transition: transform 0.3s ease;
+}
+
+.ai-subtitle-settings-btn:hover .settings-icon {
+  transform: rotate(45deg);
+}
+
+.ai-subtitle-settings-btn[data-active="true"] {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.ai-subtitle-settings-btn[data-active="true"] .settings-icon {
+  transform: rotate(90deg);
+}

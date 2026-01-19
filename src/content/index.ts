@@ -13,6 +13,9 @@ import type { PlatformAdapter } from './adapters/types';
 import { createTranslateButton, TranslateButton } from './ui/translate-button';
 import { createFloatingButton, FloatingButton } from './ui/floating-button';
 import { createProgressOverlay, ProgressOverlay } from './ui/progress-overlay';
+import { createSettingsPanel, SettingsPanel } from './ui/settings-panel';
+import type { RenderOptions } from './adapters/types';
+import { DEFAULT_RENDER_OPTIONS } from './adapters/types';
 import { showErrorToast, showSuccessToast, showInfoToast } from './ui/error-display';
 import {
   sendSubtitleDetected,
@@ -25,6 +28,8 @@ import {
   saveTranslation,
   addMessageListener,
   setupMessageListener,
+  getAllCachedTranslations,
+  loadCachedTranslation,
 } from './message-sender';
 import { createRealtimeTranslator, RealtimeTranslator, TranslatedCue } from './realtime-translator';
 import type { TranslationProgressMessage, TranslationCompleteMessage, TranslationErrorMessage, TranslationChunkCompleteMessage } from '../shared/types/messages';
@@ -48,10 +53,12 @@ let floatingButton: FloatingButton | null = null;
 let progressOverlay: ProgressOverlay | null = null;
 let subtitleRenderer: SubtitleRenderer | null = null;
 let realtimeTranslator: RealtimeTranslator | null = null;
+let settingsPanel: SettingsPanel | null = null;
 let currentJobId: string | null = null;
 let translatedCues: Cue[] = [];
 let initialized = false;
 const realtimeMode = true;  // Default to real-time mode
+let currentRenderOptions: RenderOptions = { ...DEFAULT_RENDER_OPTIONS };
 
 // ============================================================================
 // Initialization
@@ -192,16 +199,21 @@ async function updateLocalModeIndicator(): Promise<void> {
 function createUIComponents(): void {
   if (!currentPlatform) return;
 
-  // Create translate button (in player controls)
+  // Load saved render options
+  void loadRenderOptions();
+
+  // Create translate button (in player controls) with settings callback
   translateButton = createTranslateButton({
     platform: currentPlatform,
     onClick: handleTranslateClick,
+    onSettingsClick: handleSettingsClick,
   });
 
   // Create floating button (more visible, on top of player)
   floatingButton = createFloatingButton({
     platform: currentPlatform,
     onClick: handleTranslateClick,
+    onSettingsClick: handleSettingsClick,
   });
 
   // Create progress overlay
@@ -211,6 +223,15 @@ function createUIComponents(): void {
 
   // Create subtitle renderer
   subtitleRenderer = createSubtitleRenderer();
+
+  // Create settings panel
+  settingsPanel = createSettingsPanel({
+    platform: currentPlatform,
+    renderOptions: currentRenderOptions,
+    onSettingsChange: handleSettingsChange,
+    onCacheSelect: (cacheId: string) => void handleCacheSelect(cacheId),
+    onTranslate: () => void handleTranslateClick(),
+  });
 
   // Mount buttons after player is ready
   waitForPlayerAndMountButton();
@@ -289,6 +310,211 @@ function waitForPlayerAndMountButton(): void {
   // Also try after DOMContentLoaded
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', tryMount);
+  }
+}
+
+// ============================================================================
+// Settings Management
+// ============================================================================
+
+const RENDER_OPTIONS_STORAGE_KEY = 'ai-subtitle-render-options';
+
+/**
+ * Load render options from storage
+ */
+async function loadRenderOptions(): Promise<void> {
+  try {
+    // Try to load from localStorage (accessible in MAIN world)
+    const stored = localStorage.getItem(RENDER_OPTIONS_STORAGE_KEY);
+    if (stored) {
+      const parsed = JSON.parse(stored) as Partial<RenderOptions>;
+      currentRenderOptions = { ...DEFAULT_RENDER_OPTIONS, ...parsed };
+      console.log('[Content] Loaded render options:', currentRenderOptions);
+    }
+  } catch (error) {
+    console.warn('[Content] Failed to load render options:', error);
+  }
+}
+
+/**
+ * Save render options to storage
+ */
+function saveRenderOptions(options: RenderOptions): void {
+  try {
+    localStorage.setItem(RENDER_OPTIONS_STORAGE_KEY, JSON.stringify(options));
+    console.log('[Content] Saved render options');
+  } catch (error) {
+    console.warn('[Content] Failed to save render options:', error);
+  }
+}
+
+/**
+ * Sync UI state across all components (translate button, floating button, settings panel)
+ * Note: Exported for potential external use; prefix with underscore if unused to satisfy linter
+ */
+function _syncUIState(
+  state: 'idle' | 'translating' | 'complete' | 'error' | 'cached' | 'local',
+  progress?: number
+): void {
+  translateButton?.setState(state);
+  // FloatingButton doesn't have 'local' state, map it to 'complete'
+  const floatingState = state === 'local' ? 'complete' : state;
+  floatingButton?.setState(floatingState);
+  // SettingsPanel only has idle/translating/complete/error
+  const panelState = (state === 'cached' || state === 'local') ? 'complete' : state;
+  settingsPanel?.setTranslationState(panelState);
+  
+  if (progress !== undefined) {
+    translateButton?.setProgress(progress);
+    floatingButton?.setProgress(progress);
+    settingsPanel?.setProgress(progress);
+  }
+}
+
+// Export for potential future use
+void _syncUIState;
+
+/**
+ * Find the best container for mounting the settings panel
+ * Different platforms have different DOM structures
+ */
+function findSettingsPanelContainer(): HTMLElement | null {
+  if (!currentPlatform) return null;
+  
+  switch (currentPlatform) {
+    case 'youtube':
+      // YouTube: mount near the control bar button
+      return translateButton?.getContainer() ?? document.querySelector('.ytp-right-controls');
+    
+    case 'netflix':
+      // Netflix: mount in the player container (controls are dynamic)
+      return document.querySelector('.watch-video--player-view') ||
+             document.querySelector('[data-uia="player"]') ||
+             document.querySelector('.VideoContainer');
+    
+    case 'disney':
+      // Disney+: mount in the player container
+      return document.querySelector('.btm-media-client-element') ||
+             document.querySelector('[data-testid="web-player"]');
+    
+    case 'prime':
+      // Prime Video: mount in the player container
+      return document.querySelector('.webPlayerContainer') ||
+             document.querySelector('[id^="dv-web-player"]');
+    
+    default:
+      return translateButton?.getContainer() ?? null;
+  }
+}
+
+/**
+ * Handle settings button click - toggle settings panel
+ */
+function handleSettingsClick(): void {
+  if (!settingsPanel) return;
+
+  // Mount panel if not already mounted
+  if (!document.getElementById('ai-subtitle-settings-panel')) {
+    const container = findSettingsPanelContainer();
+    if (container) {
+      settingsPanel.mount(container);
+    } else {
+      console.warn('[Content] Could not find container for settings panel');
+      return;
+    }
+    
+    // Load cached translations for this video
+    void loadCachedTranslationsForPanel();
+  }
+
+  settingsPanel.toggle();
+  
+  // Update settings button active state
+  const settingsBtn = document.querySelector('.ai-subtitle-settings-btn');
+  if (settingsBtn) {
+    settingsBtn.setAttribute('data-active', String(settingsPanel.isVisible()));
+  }
+}
+
+/**
+ * Load cached translations for the current video into the settings panel
+ */
+async function loadCachedTranslationsForPanel(): Promise<void> {
+  if (!currentAdapter || !settingsPanel || !currentPlatform) return;
+
+  const videoId = currentAdapter.getVideoId();
+  if (!videoId) return;
+
+  try {
+    const result = await getAllCachedTranslations({ platform: currentPlatform, videoId });
+    if (result.translations && result.translations.length > 0) {
+      settingsPanel.updateCachedTranslations(result.translations);
+    }
+  } catch (error) {
+    console.warn('[Content] Failed to load cached translations:', error);
+  }
+}
+
+/**
+ * Handle settings change from panel
+ */
+function handleSettingsChange(changes: Partial<RenderOptions>): void {
+  // Update current options
+  currentRenderOptions = { ...currentRenderOptions, ...changes };
+  
+  // Save to storage
+  saveRenderOptions(currentRenderOptions);
+  
+  // Apply to realtime translator if active
+  if (realtimeTranslator && realtimeTranslator.getState() === 'active') {
+    realtimeTranslator.updateRenderOptions(currentRenderOptions);
+  }
+  
+  // Apply to subtitle renderer if active
+  if (subtitleRenderer) {
+    subtitleRenderer.updateOptions(currentRenderOptions);
+  }
+  
+  console.log('[Content] Settings changed:', changes);
+}
+
+/**
+ * Handle cache selection from panel
+ */
+async function handleCacheSelect(cacheId: string): Promise<void> {
+  if (!currentAdapter || !currentPlatform) return;
+
+  try {
+    showInfoToast('正在載入快取翻譯...');
+    
+    const result = await loadCachedTranslation(cacheId);
+    
+    if (!result.found || !result.subtitle?.cues?.length) {
+      showInfoToast('無法載入快取翻譯');
+      return;
+    }
+    
+    // Stop current translator if active
+    if (realtimeTranslator?.getState() === 'active') {
+      realtimeTranslator.stop();
+    }
+    
+    // Load the cached translation
+    const preferences = await getPreferencesFromBridge();
+    const autoLoadSuccess = await autoLoadCachedTranslation(
+      result.subtitle.cues,
+      preferences.defaultTargetLanguage
+    );
+    
+    if (autoLoadSuccess) {
+      // Hide settings panel after successful load
+      settingsPanel?.hide();
+    } else {
+      showErrorToast('API_ERROR', '載入快取翻譯失敗');
+    }
+  } catch (error) {
+    console.error('[Content] Failed to load cached translation:', error);
+    showErrorToast('API_ERROR', '載入快取翻譯時發生錯誤');
   }
 }
 
@@ -1223,6 +1449,8 @@ function handleNavigation(): void {
   translatedCues = [];
   translateButton?.setState('idle');
   floatingButton?.setState('idle');
+  settingsPanel?.setTranslationState('idle');
+  settingsPanel?.unmount();
   progressOverlay?.hide();
   subtitleRenderer?.detach();
   

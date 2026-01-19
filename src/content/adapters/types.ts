@@ -63,6 +63,9 @@ export interface RenderOptions {
   /** Font size in pixels */
   fontSize: number;
   
+  /** Font color in hex format (e.g., '#FFFFFF') */
+  fontColor: string;
+  
   /** Position on screen */
   position: 'top' | 'bottom';
   
@@ -190,10 +193,11 @@ export class AdapterError extends Error {
  * Default render options
  */
 export const DEFAULT_RENDER_OPTIONS: RenderOptions = {
-  fontSize: 18,
+  fontSize: 28,
+  fontColor: '#FFFFFF',
   position: 'bottom',
-  bilingual: false,
+  bilingual: true,
   bilingualOrder: 'original-first',
-  background: 'shadow',
+  background: 'box',
   fontFamily: 'system-ui, -apple-system, sans-serif'
 };

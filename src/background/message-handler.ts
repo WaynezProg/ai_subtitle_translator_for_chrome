@@ -16,6 +16,10 @@ import type {
   CancelTranslationResponse,
   GetCachedTranslationMessage,
   GetCachedTranslationResponse,
+  GetAllCachedTranslationsMessage,
+  GetAllCachedTranslationsResponse,
+  LoadCachedTranslationMessage,
+  LoadCachedTranslationResponse,
   GetAuthStatusMessage,
   GetAuthStatusResponse,
   TranslateTextMessage,
@@ -50,6 +54,8 @@ interface MessageHandlers {
   REQUEST_TRANSLATION: HandlerFunction<RequestTranslationMessage, RequestTranslationResponse>;
   CANCEL_TRANSLATION: HandlerFunction<CancelTranslationMessage, CancelTranslationResponse>;
   GET_CACHED_TRANSLATION: HandlerFunction<GetCachedTranslationMessage, GetCachedTranslationResponse>;
+  GET_ALL_CACHED_TRANSLATIONS: HandlerFunction<GetAllCachedTranslationsMessage, GetAllCachedTranslationsResponse>;
+  LOAD_CACHED_TRANSLATION: HandlerFunction<LoadCachedTranslationMessage, LoadCachedTranslationResponse>;
   GET_AUTH_STATUS: HandlerFunction<GetAuthStatusMessage, GetAuthStatusResponse>;
   TRANSLATE_TEXT: HandlerFunction<TranslateTextMessage, TranslateTextResponse>;
   TRANSLATE_BATCH: HandlerFunction<TranslateBatchMessage, TranslateBatchResponse>;

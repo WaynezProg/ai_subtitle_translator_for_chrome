@@ -55,10 +55,11 @@ const CURRENT_DISCLAIMER_VERSION = '1.0.0';
 
 const DEFAULT_RENDER_OPTIONS: RenderOptions = {
   fontSize: UI_CONSTANTS.DEFAULT_FONT_SIZE,
+  fontColor: '#FFFFFF',
   position: 'bottom',
-  bilingual: false,
+  bilingual: true,
   bilingualOrder: 'original-first',
-  background: 'shadow',
+  background: 'box',
   fontFamily: 'system-ui, -apple-system, sans-serif',
 };
 

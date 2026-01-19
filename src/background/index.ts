@@ -16,12 +16,15 @@ import type {
   RequestTranslationMessage,
   CancelTranslationMessage,
   GetCachedTranslationMessage,
+  GetAllCachedTranslationsMessage,
+  LoadCachedTranslationMessage,
   GetAuthStatusMessage,
   TranslateTextMessage,
   TranslateBatchMessage,
   SaveTranslationMessage,
   ValidateOAuthTokenMessage,
 } from '../shared/types/messages';
+import { cacheManager } from '../shared/cache';
 import { ProviderFactory } from '../shared/providers/factory';
 import { getUserSettings } from '../shared/utils/preferences';
 import { getAuthConfig } from '../shared/utils/auth-storage';
@@ -769,6 +772,61 @@ messageHandler.on('SAVE_TRANSLATION', async (message: SaveTranslationMessage, _s
   } catch (error) {
     console.error('[Background] Failed to save translation:', error);
     return successResponse({ saved: false });
+  }
+});
+
+// Handler for GET_ALL_CACHED_TRANSLATIONS (query all cached translations for a video)
+messageHandler.on('GET_ALL_CACHED_TRANSLATIONS', async (message: GetAllCachedTranslationsMessage, _sender) => {
+  const { platform, videoId } = message.payload;
+  
+  console.log('[Background] Get all cached translations requested:', { platform, videoId });
+  
+  try {
+    const translations = await cacheManager.getAllCachedTranslationsForVideo(videoId);
+    
+    console.log('[Background] Found cached translations:', {
+      videoId,
+      count: translations.length,
+    });
+    
+    return successResponse({ translations });
+  } catch (error) {
+    console.error('[Background] Failed to get cached translations:', error);
+    return successResponse({ translations: [] });
+  }
+});
+
+// Handler for LOAD_CACHED_TRANSLATION (load a specific cached translation by ID)
+messageHandler.on('LOAD_CACHED_TRANSLATION', async (message: LoadCachedTranslationMessage, _sender) => {
+  const { cacheId } = message.payload;
+  
+  console.log('[Background] Load cached translation requested:', { cacheId });
+  
+  try {
+    const result = await cacheManager.getByCacheId(cacheId);
+    
+    if (result.hit && result.subtitle) {
+      console.log('[Background] Loaded cached translation:', {
+        cacheId,
+        cueCount: result.subtitle.cues?.length || 0,
+      });
+      return successResponse({
+        found: true,
+        subtitle: result.subtitle,
+      });
+    }
+    
+    console.log('[Background] Cached translation not found:', { cacheId });
+    return successResponse({
+      found: false,
+      subtitle: undefined,
+    });
+  } catch (error) {
+    console.error('[Background] Failed to load cached translation:', error);
+    return successResponse({
+      found: false,
+      subtitle: undefined,
+    });
   }
 });
 
