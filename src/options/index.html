@@ -130,6 +130,11 @@
                 <label for="oauth-refresh-token">Refresh Token (選填)</label>
                 <input type="password" id="oauth-refresh-token" placeholder="貼上 refreshToken" autocomplete="off">
               </div>
+              <div class="form-group">
+                <label for="oauth-expires-at">過期時間 (選填)</label>
+                <input type="text" id="oauth-expires-at" placeholder="例如: 2026-01-20T12:00:00Z 或留空使用 24 小時" autocomplete="off">
+                <span class="field-hint">來自 session-helper 的 expiresAt 值，留空則預設 24 小時後過期</span>
+              </div>
               <button id="oauth-save-token" class="btn btn-secondary">儲存 Token</button>
             </div>
           </details>

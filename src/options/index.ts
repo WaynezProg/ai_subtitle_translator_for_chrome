@@ -237,9 +237,11 @@ async function handleSaveOAuthToken(): Promise<void> {
   
   const accessTokenInput = document.getElementById('oauth-access-token') as HTMLInputElement;
   const refreshTokenInput = document.getElementById('oauth-refresh-token') as HTMLInputElement;
+  const expiresAtInput = document.getElementById('oauth-expires-at') as HTMLInputElement;
   
   const accessToken = accessTokenInput?.value.trim();
   const refreshToken = refreshTokenInput?.value.trim();
+  const expiresAtValue = expiresAtInput?.value.trim();
   
   if (!accessToken) {
     showNotification('請輸入 Access Token', 'error');
@@ -253,11 +255,31 @@ async function handleSaveOAuthToken(): Promise<void> {
   }
   
   try {
+    // Determine expiration time:
+    // 1. Use user-provided expiresAt if valid
+    // 2. Otherwise default to 24 hours (more conservative than 1 hour)
+    let expiresAt: string;
+    if (expiresAtValue) {
+      const parsedDate = new Date(expiresAtValue);
+      if (isNaN(parsedDate.getTime())) {
+        showNotification('過期時間格式無效，請使用 ISO 8601 格式 (例如: 2026-01-20T12:00:00Z)', 'error');
+        if (saveBtn) {
+          saveBtn.disabled = false;
+          saveBtn.textContent = '儲存 Token';
+        }
+        return;
+      }
+      expiresAt = parsedDate.toISOString();
+    } else {
+      // Default to 24 hours - more conservative than 1 hour since actual expiration is unknown
+      expiresAt = new Date(Date.now() + 24 * 3600 * 1000).toISOString();
+    }
+    
     // Store OAuth tokens
     const tokens = {
       accessToken,
       refreshToken: refreshToken || undefined,
-      expiresAt: new Date(Date.now() + 3600 * 1000).toISOString(), // Default 1 hour
+      expiresAt,
     };
     
     if (providerType === 'claude-subscription') {
@@ -269,6 +291,7 @@ async function handleSaveOAuthToken(): Promise<void> {
     // Clear input fields
     accessTokenInput.value = '';
     refreshTokenInput.value = '';
+    if (expiresAtInput) expiresAtInput.value = '';
     
     const providerName = providerType === 'claude-subscription' ? 'Claude' : 'ChatGPT';
     showNotification(`${providerName} Token 已儲存！`);
