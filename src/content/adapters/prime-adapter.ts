@@ -251,11 +251,17 @@ export class PrimeAdapter implements PlatformAdapter {
     const self = this;
     
     window.fetch = async function(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-      const url = typeof input === 'string' 
-        ? input 
-        : input instanceof URL 
-          ? input.toString() 
-          : input.url;
+      let url: string;
+      if (typeof input === 'string') {
+        url = input;
+      } else if (input instanceof URL) {
+        url = input.toString();
+      } else if (input instanceof Request) {
+        url = input.url;
+      } else {
+        // Fallback for unexpected types
+        url = String(input);
+      }
       
       // Capture authorization headers from API requests
       if (self.isApiRequest(url) && init?.headers) {

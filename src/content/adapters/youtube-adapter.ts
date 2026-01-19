@@ -410,11 +410,17 @@ export class YouTubeAdapter implements PlatformAdapter {
     
     // Override fetch
     window.fetch = async function(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-      const url = typeof input === 'string' 
-        ? input 
-        : input instanceof URL 
-          ? input.toString() 
-          : input.url;
+      let url: string;
+      if (typeof input === 'string') {
+        url = input;
+      } else if (input instanceof URL) {
+        url = input.toString();
+      } else if (input instanceof Request) {
+        url = input.url;
+      } else {
+        // Fallback for unexpected types
+        url = String(input);
+      }
       
       // For timedtext requests, capture the response body
       if (adapter.isTimedTextUrl(url)) {

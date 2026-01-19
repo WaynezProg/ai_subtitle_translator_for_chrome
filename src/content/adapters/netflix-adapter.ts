@@ -651,11 +651,17 @@ export class NetflixAdapter implements PlatformAdapter {
     const adapter = this;
     
     window.fetch = async function(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-      const url = typeof input === 'string' 
-        ? input 
-        : input instanceof URL 
-          ? input.href 
-          : input.url;
+      let url: string;
+      if (typeof input === 'string') {
+        url = input;
+      } else if (input instanceof URL) {
+        url = input.href;
+      } else if (input instanceof Request) {
+        url = input.url;
+      } else {
+        // Fallback for unexpected types - try to convert to string
+        url = String(input);
+      }
       
       // Skip video/audio chunks
       const isVideoChunk = /\/range\/\d+-\d+/.test(url);
