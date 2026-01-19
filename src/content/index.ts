@@ -607,57 +607,71 @@ async function translateInBackground(
       });
     }
     
-    console.log(`[Content] Translating ${batches.length} batches in background...`);
-    
-    // Translate batches
+    console.log(`[Content] Translating ${batches.length} batches in background with context...`);
+
+    // Translate batches with context passing for consistency
     let translatedCount = 0;
+    let currentContext: { previousCues?: Array<{ original: string; translated: string }> } | undefined;
+
     for (const batch of batches) {
       // Check if translator was stopped
       if (!realtimeTranslator || realtimeTranslator.getState() !== 'active') {
         console.log('[Content] Translator stopped, aborting background translation');
         break;
       }
-      
+
       const batchText = batch.texts.join('\n---\n');
-      
+
       try {
         const result = await translateText({
           text: batchText,
           sourceLanguage,
           targetLanguage,
+          context: currentContext,
         });
-        
+
         // Parse batch result back into individual translations
         const translations = result.translatedText.split(/\n---\n|\n-{3,}\n/);
-        
+
+        // Build context for next batch (last 3 translations)
+        const contextPairs: Array<{ original: string; translated: string }> = [];
+
         for (let i = 0; i < batch.texts.length; i++) {
           const cueIndex = batch.cueIndices[i];
           const original = batch.texts[i].trim();
           const translated = (translations[i] || original).trim();
-          
+
           if (original && translated) {
             // Store in map for lookup
             preTranslatedCuesMap.set(original, translated);
-            
+
             // Update the timing cue with translation (realtime translator will pick this up)
             if (cueIndex < preTranslatedCuesWithTiming.length) {
               preTranslatedCuesWithTiming[cueIndex].translatedText = translated;
             }
+
+            // Collect for context (we'll take last 3)
+            contextPairs.push({ original, translated });
           }
         }
-        
+
+        // Update context with last 3 translations from this batch
+        currentContext = {
+          previousCues: contextPairs.slice(-3),
+        };
+
         translatedCount += batch.texts.length;
         const progress = Math.round((translatedCount / cues.length) * 100);
-        
+
         // Update button progress instead of overlay
         translateButton?.setProgress(progress);
         floatingButton?.setProgress(progress);
-        
+
         console.log(`[Content] Background translation progress: ${progress}%`);
-        
+
       } catch (error) {
         console.error('[Content] Batch translation error:', error);
-        // Continue with next batch
+        // Continue with next batch, but keep current context
       }
     }
     

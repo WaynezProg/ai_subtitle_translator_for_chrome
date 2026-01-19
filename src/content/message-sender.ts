@@ -192,13 +192,20 @@ export async function translateText(params: {
   text: string;
   sourceLanguage: string;
   targetLanguage: string;
+  /** Optional context from previous batch for better translation consistency */
+  context?: {
+    previousCues?: Array<{
+      original: string;
+      translated: string;
+    }>;
+  };
 }): Promise<{ translatedText: string; cached: boolean }> {
   const message: TranslateTextMessage = {
     type: 'TRANSLATE_TEXT',
     payload: params,
     requestId: generateRequestId(),
   };
-  
+
   const response = await sendMessage<TranslateTextResponse>(message);
   if (!response.success || !response.data) {
     throw new Error(response.error?.message || 'Translation failed');

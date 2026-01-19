@@ -29,8 +29,14 @@ const CLAUDE_OAUTH_CONFIG = {
   scopes: ['org:create_api_key', 'user:profile', 'user:inference'],
   
   // API endpoints for using the token
+  // OAuth tokens require beta=true query param and special headers
   apiBaseUrl: 'https://api.anthropic.com',
   messagesEndpoint: '/v1/messages',
+  
+  // Required headers for OAuth authentication (discovered from opencode-anthropic-auth)
+  // Note: Removed interleaved-thinking to avoid slower responses
+  oauthBeta: 'oauth-2025-04-20',
+  userAgent: 'claude-cli/2.1.2 (external, cli)',
 };
 
 // Redirect URI will be the extension's options page with a callback path
@@ -151,38 +157,81 @@ export async function refreshClaudeToken(refreshToken: string): Promise<ClaudeOA
 
 /**
  * Validate the access token by making a test API call
+ * 
+ * Claude OAuth tokens from the PKCE flow require special headers:
+ * - anthropic-beta: oauth-2025-04-20
+ * - user-agent: claude-cli/2.1.2 (external, cli)
+ * - ?beta=true query parameter
+ * 
+ * This is based on the opencode-anthropic-auth implementation.
  */
 export async function validateClaudeToken(accessToken: string): Promise<boolean> {
   try {
-    // Try to make a simple API call to validate the token
-    const response = await fetch(`${CLAUDE_OAUTH_CONFIG.apiBaseUrl}/v1/models`, {
-      method: 'GET',
+    // Claude OAuth tokens require beta endpoint and special headers
+    const url = `${CLAUDE_OAUTH_CONFIG.apiBaseUrl}${CLAUDE_OAUTH_CONFIG.messagesEndpoint}?beta=true`;
+    
+    const response = await fetch(url, {
+      method: 'POST',
       headers: {
+        'Content-Type': 'application/json',
         'Authorization': `Bearer ${accessToken}`,
         'anthropic-version': '2023-06-01',
+        'anthropic-beta': CLAUDE_OAUTH_CONFIG.oauthBeta,
+        'anthropic-dangerous-direct-browser-access': 'true',
+        'user-agent': CLAUDE_OAUTH_CONFIG.userAgent,
       },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1,
+        messages: [{ role: 'user', content: 'hi' }],
+      }),
     });
     
-    return response.ok;
-  } catch {
+    console.log('[ClaudeOAuth] Validation response status:', response.status);
+    
+    // 200 = success, token is valid
+    // 400 = bad request but auth succeeded (token valid)
+    // 401/403 = unauthorized (token invalid)
+    // 429 = rate limited but token is valid
+    if (response.ok || response.status === 400 || response.status === 429) {
+      return true;
+    }
+    
+    // Log error details for debugging
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.warn('[ClaudeOAuth] Validation failed:', response.status, errorText);
+    }
+    
+    return false;
+  } catch (error) {
+    console.error('[ClaudeOAuth] Token validation error:', error);
     return false;
   }
 }
 
 /**
  * Make a translation request using the OAuth token
+ * 
+ * Uses the beta endpoint with OAuth-specific headers.
  */
 export async function translateWithClaudeOAuth(
   accessToken: string,
   messages: Array<{ role: 'user' | 'assistant'; content: string }>,
   model: string = 'claude-sonnet-4-20250514'
 ): Promise<string> {
-  const response = await fetch(`${CLAUDE_OAUTH_CONFIG.apiBaseUrl}${CLAUDE_OAUTH_CONFIG.messagesEndpoint}`, {
+  // OAuth tokens require beta endpoint and special headers
+  const url = `${CLAUDE_OAUTH_CONFIG.apiBaseUrl}${CLAUDE_OAUTH_CONFIG.messagesEndpoint}?beta=true`;
+  
+  const response = await fetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${accessToken}`,
       'anthropic-version': '2023-06-01',
+      'anthropic-beta': CLAUDE_OAUTH_CONFIG.oauthBeta,
+      'anthropic-dangerous-direct-browser-access': 'true',
+      'user-agent': CLAUDE_OAUTH_CONFIG.userAgent,
     },
     body: JSON.stringify({
       model,
@@ -239,7 +288,7 @@ export async function launchClaudeOAuthFlow(): Promise<ClaudeOAuthTokens> {
         url: authUrl,
         interactive: true,
       },
-      async (redirectUrl) => {
+      (redirectUrl) => {
         if (chrome.runtime.lastError) {
           reject(new Error(chrome.runtime.lastError.message));
           return;
@@ -250,7 +299,8 @@ export async function launchClaudeOAuthFlow(): Promise<ClaudeOAuthTokens> {
           return;
         }
         
-        try {
+        // Process the callback asynchronously
+        const processCallback = async (): Promise<void> => {
           // Parse the redirect URL to get the authorization code
           const url = new URL(redirectUrl);
           const code = url.searchParams.get('code');
@@ -258,21 +308,19 @@ export async function launchClaudeOAuthFlow(): Promise<ClaudeOAuthTokens> {
           const error = url.searchParams.get('error');
           
           if (error) {
-            reject(new Error(`OAuth error: ${error}`));
-            return;
+            throw new Error(`OAuth error: ${error}`);
           }
           
           if (!code || !state) {
-            reject(new Error('Missing authorization code or state'));
-            return;
+            throw new Error('Missing authorization code or state');
           }
           
           // Exchange the code for tokens
           const tokens = await completeClaudeOAuth(code, state);
           resolve(tokens);
-        } catch (err) {
-          reject(err);
-        }
+        };
+        
+        processCallback().catch(reject);
       }
     );
   });

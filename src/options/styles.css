@@ -417,88 +417,6 @@ body {
 }
 
 /* Subscription Section */
-.subscription-warning {
-  display: flex;
-  gap: 12px;
-  padding: 16px;
-  background: #fff3cd;
-  border: 1px solid #ffc107;
-  border-radius: 8px;
-  margin-bottom: 20px;
-}
-
-.subscription-warning .warning-icon {
-  font-size: 24px;
-  flex-shrink: 0;
-}
-
-.subscription-warning .warning-content {
-  flex: 1;
-}
-
-.subscription-warning .warning-content strong {
-  display: block;
-  color: #856404;
-  margin-bottom: 4px;
-}
-
-.subscription-warning .warning-content p {
-  color: #856404;
-  font-size: 13px;
-  margin: 0;
-}
-
-.subscription-steps {
-  margin-bottom: 20px;
-}
-
-.subscription-steps h3 {
-  margin-bottom: 16px;
-}
-
-.subscription-steps ol {
-  list-style: none;
-  padding: 0;
-}
-
-.subscription-steps li {
-  display: flex;
-  gap: 16px;
-  padding: 16px;
-  background: #f8f9fa;
-  border-radius: 8px;
-  margin-bottom: 12px;
-}
-
-.subscription-steps .step-number {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  background: #007aff;
-  color: #fff;
-  border-radius: 50%;
-  font-weight: 600;
-  flex-shrink: 0;
-}
-
-.subscription-steps .step-content {
-  flex: 1;
-}
-
-.subscription-steps .step-content strong {
-  display: block;
-  color: #1a1a1a;
-  margin-bottom: 4px;
-}
-
-.subscription-steps .step-content p {
-  color: #666;
-  font-size: 13px;
-  margin: 0 0 12px;
-}
-
 .subscription-status {
   display: flex;
   gap: 12px;
@@ -567,6 +485,35 @@ body {
   margin: 0 0 16px;
 }
 
+/* OAuth Login Section */
+.oauth-login-section {
+  text-align: center;
+  padding: 20px 0;
+}
+
+.oauth-login-section .btn-large {
+  font-size: 16px;
+  padding: 14px 32px;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  box-shadow: 0 2px 8px rgba(0, 122, 255, 0.3);
+  transition: all 0.2s ease;
+}
+
+.oauth-login-section .btn-large:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 122, 255, 0.4);
+}
+
+.oauth-login-section .btn-large:active {
+  transform: translateY(0);
+}
+
+.oauth-login-section .btn-icon {
+  font-size: 18px;
+}
+
 .oauth-status {
   display: flex;
   align-items: center;
@@ -592,39 +539,78 @@ body {
 .oauth-actions {
   display: flex;
   gap: 12px;
+  flex-wrap: wrap;
 }
 
-.section-divider {
-  border: none;
-  border-top: 1px solid #eee;
-  margin: 24px 0;
-}
-
-/* Legacy Login Details */
-.legacy-login {
+/* Manual Token Input Section (as <details>) */
+.manual-token-section {
+  margin: 16px 0;
   border: 1px solid #ddd;
   border-radius: 8px;
-  padding: 0;
+  overflow: hidden;
 }
 
-.legacy-login summary {
+.manual-token-section summary {
   padding: 12px 16px;
-  cursor: pointer;
-  font-weight: 500;
-  color: #666;
   background: #f8f9fa;
-  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  color: #666;
+  user-select: none;
 }
 
-.legacy-login summary:hover {
-  background: #f0f0f0;
+.manual-token-section summary:hover {
+  background: #eee;
 }
 
-.legacy-login[open] summary {
-  border-radius: 8px 8px 0 0;
-  border-bottom: 1px solid #ddd;
-}
-
-.legacy-login > *:not(summary) {
+.manual-token-content {
   padding: 16px;
+  background: #fafafa;
 }
+
+.manual-token-section .form-group {
+  margin-bottom: 12px;
+}
+
+.manual-token-section .form-group:last-of-type {
+  margin-bottom: 0;
+}
+
+.manual-token-section label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: #555;
+  margin-bottom: 4px;
+}
+
+.manual-token-section input {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 14px;
+  font-family: 'Monaco', 'Menlo', monospace;
+}
+
+.manual-token-section input:focus {
+  outline: none;
+  border-color: #007AFF;
+  box-shadow: 0 0 0 2px rgba(0, 122, 255, 0.1);
+}
+
+.token-help {
+  margin-top: 12px;
+  font-size: 12px;
+  color: #888;
+  line-height: 1.5;
+}
+
+.token-help code {
+  background: #e8e8e8;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: 'Monaco', 'Menlo', monospace;
+  font-size: 11px;
+}
+

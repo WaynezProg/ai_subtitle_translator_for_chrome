@@ -1,8 +1,8 @@
 /**
- * Claude OAuth Provider
+ * ChatGPT OAuth Provider
  * 
- * Implements translation using Claude Pro subscription via OAuth authentication.
- * This is the recommended way to authenticate with Claude Pro.
+ * Implements translation using ChatGPT Plus subscription via OAuth authentication.
+ * This is the recommended way to authenticate with ChatGPT Plus.
  * 
  * @see specs/001-ai-subtitle-translator/contracts/translation-provider.md
  */
@@ -23,53 +23,54 @@ import type {
 import { ProviderError } from './types';
 import { TRANSLATION_CONFIG } from '../utils/constants';
 import {
-  getValidClaudeToken,
-  validateClaudeToken,
-  translateWithClaudeOAuth,
-  storeClaudeTokens,
-  clearClaudeTokens,
-  launchClaudeOAuthFlow,
-  type ClaudeOAuthTokens,
-} from './claude-oauth';
+  getValidChatGPTToken,
+  validateChatGPTToken,
+  storeChatGPTTokens,
+  clearChatGPTTokens,
+  launchChatGPTOAuthFlow,
+  type ChatGPTOAuthTokens,
+} from './chatgpt-oauth';
 
 // ============================================================================
 // Constants
 // ============================================================================
 
-const CLAUDE_API_BASE = 'https://api.anthropic.com';
+// ChatGPT OAuth tokens work with ChatGPT backend-api (Codex endpoint)
+// Reference: opencode-openai-codex-auth uses chatgpt.com/backend-api
+const CHATGPT_BACKEND_API = 'https://chatgpt.com/backend-api';
 
 // ============================================================================
-// Claude OAuth Provider
+// ChatGPT OAuth Provider
 // ============================================================================
 
-export class ClaudeOAuthProvider implements TranslationProvider {
-  readonly type: ProviderType = 'claude-subscription';
-  readonly displayName = 'Claude Pro (OAuth)';
+export class ChatGPTOAuthProvider implements TranslationProvider {
+  readonly type: ProviderType = 'chatgpt-subscription';
+  readonly displayName = 'ChatGPT Plus (OAuth)';
   
   readonly availableModels: ModelInfo[] = [
     {
-      id: 'claude-sonnet-4-20250514',
-      name: 'Claude Sonnet 4',
-      contextWindow: 200000,
-      maxOutputTokens: 8192,
+      id: 'gpt-4o',
+      name: 'GPT-4o',
+      contextWindow: 128000,
+      maxOutputTokens: 16384,
       inputCostPer1M: 0, // Subscription - no per-token cost
       outputCostPer1M: 0,
       recommended: true,
     },
     {
-      id: 'claude-3-5-sonnet-20241022',
-      name: 'Claude 3.5 Sonnet',
-      contextWindow: 200000,
-      maxOutputTokens: 8192,
+      id: 'gpt-4o-mini',
+      name: 'GPT-4o Mini',
+      contextWindow: 128000,
+      maxOutputTokens: 16384,
       inputCostPer1M: 0,
       outputCostPer1M: 0,
       recommended: false,
     },
     {
-      id: 'claude-3-5-haiku-20241022',
-      name: 'Claude 3.5 Haiku',
-      contextWindow: 200000,
-      maxOutputTokens: 8192,
+      id: 'gpt-4-turbo',
+      name: 'GPT-4 Turbo',
+      contextWindow: 128000,
+      maxOutputTokens: 4096,
       inputCostPer1M: 0,
       outputCostPer1M: 0,
       recommended: false,
@@ -77,7 +78,7 @@ export class ClaudeOAuthProvider implements TranslationProvider {
   ];
   
   private accessToken: string | null = null;
-  private currentModel = 'claude-sonnet-4-20250514';
+  private currentModel = 'gpt-4o';
   
   constructor(config?: AuthProvider) {
     if (config?.credentials?.type === 'oauth') {
@@ -95,9 +96,9 @@ export class ClaudeOAuthProvider implements TranslationProvider {
   /**
    * Start OAuth flow to authenticate user
    */
-  async authenticate(): Promise<ClaudeOAuthTokens> {
-    const tokens = await launchClaudeOAuthFlow();
-    await storeClaudeTokens(tokens);
+  async authenticate(): Promise<ChatGPTOAuthTokens> {
+    const tokens = await launchChatGPTOAuthFlow();
+    await storeChatGPTTokens(tokens);
     this.accessToken = tokens.accessToken;
     return tokens;
   }
@@ -106,7 +107,7 @@ export class ClaudeOAuthProvider implements TranslationProvider {
    * Clear authentication
    */
   async logout(): Promise<void> {
-    await clearClaudeTokens();
+    await clearChatGPTTokens();
     this.accessToken = null;
   }
   
@@ -115,14 +116,14 @@ export class ClaudeOAuthProvider implements TranslationProvider {
    */
   async validateCredentials(): Promise<ValidationResult> {
     // Try to get a valid token (may refresh if expired)
-    const token = await getValidClaudeToken();
+    const token = await getValidChatGPTToken();
     
     if (!token) {
       return {
         valid: false,
         error: {
           code: 'INVALID_KEY',
-          message: 'No OAuth token configured. Please authenticate with Claude.',
+          message: 'No OAuth token configured. Please authenticate with ChatGPT.',
         },
       };
     }
@@ -130,7 +131,7 @@ export class ClaudeOAuthProvider implements TranslationProvider {
     this.accessToken = token;
     
     try {
-      const isValid = await validateClaudeToken(token);
+      const isValid = await validateChatGPTToken(token);
       
       if (!isValid) {
         return {
@@ -145,7 +146,7 @@ export class ClaudeOAuthProvider implements TranslationProvider {
       return {
         valid: true,
         accountInfo: {
-          tier: 'Claude Pro (OAuth)',
+          tier: 'ChatGPT Plus (OAuth)',
         },
       };
     } catch (error) {
@@ -168,12 +169,8 @@ export class ClaudeOAuthProvider implements TranslationProvider {
     // Build translation prompt
     const prompt = this.buildTranslationPrompt(request);
     
-    // Send message and get response
-    const response = await translateWithClaudeOAuth(
-      token,
-      [{ role: 'user', content: prompt }],
-      this.currentModel
-    );
+    // Send message and get response using OpenAI API
+    const response = await this.sendChatCompletion(token, prompt);
     
     // Parse response into cues
     const translatedCues = this.parseTranslationResponse(response, request.cues);
@@ -212,7 +209,7 @@ export class ClaudeOAuthProvider implements TranslationProvider {
     let fullResponse = '';
     let lastProgress = 0;
     
-    await this.streamTranslation(token, prompt, (chunk) => {
+    await this.streamChatCompletion(token, prompt, (chunk) => {
       fullResponse += chunk;
       
       // Estimate progress based on response length
@@ -282,71 +279,204 @@ export class ClaudeOAuthProvider implements TranslationProvider {
   // ============================================================================
   
   private async ensureValidToken(): Promise<string> {
-    const token = await getValidClaudeToken();
+    const token = await getValidChatGPTToken();
     
     if (!token) {
-      throw this.createError('AUTHENTICATION_FAILED', 'Not authenticated. Please log in with Claude.');
+      throw this.createError('AUTHENTICATION_FAILED', 'Not authenticated. Please log in with ChatGPT.');
     }
     
     this.accessToken = token;
     return token;
   }
   
-  private async streamTranslation(
-    token: string,
-    prompt: string,
-    onChunk: (chunk: string) => void
-  ): Promise<void> {
-    const response = await fetch(`${CLAUDE_API_BASE}/v1/messages?beta=true`, {
+  /**
+   * Send a chat completion request using ChatGPT backend-api
+   * Uses the conversation endpoint which supports the OAuth token
+   */
+  private async sendChatCompletion(token: string, prompt: string): Promise<string> {
+    // Generate unique IDs for the conversation
+    const messageId = this.generateUUID();
+    const parentMessageId = this.generateUUID();
+
+    const response = await fetch(`${CHATGPT_BACKEND_API}/conversation`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${token}`,
-        'anthropic-version': '2023-06-01',
-        'anthropic-beta': 'oauth-2025-04-20',
-        'anthropic-dangerous-direct-browser-access': 'true',
-        'user-agent': 'claude-cli/2.1.2 (external, cli)',
       },
       body: JSON.stringify({
+        action: 'next',
+        messages: [
+          {
+            id: messageId,
+            author: { role: 'user' },
+            content: {
+              content_type: 'text',
+              parts: [prompt],
+            },
+          },
+        ],
+        parent_message_id: parentMessageId,
         model: this.currentModel,
-        max_tokens: 8192,
-        stream: true,
-        messages: [{ role: 'user', content: prompt }],
+        timezone_offset_min: new Date().getTimezoneOffset(),
+        history_and_training_disabled: true,
       }),
     });
-    
+
     if (!response.ok) {
       const errorText = await response.text();
-      throw this.createError('SERVICE_UNAVAILABLE', `API error: ${errorText}`);
+
+      if (response.status === 401 || response.status === 403) {
+        throw this.createError('AUTHENTICATION_FAILED', 'TOKEN_EXPIRED');
+      }
+
+      throw this.createError('SERVICE_UNAVAILABLE', `ChatGPT API error: ${response.status} - ${errorText}`);
     }
-    
+
+    // Parse the SSE response
+    return await this.parseSSEResponse(response);
+  }
+
+  /**
+   * Parse Server-Sent Events response from ChatGPT backend-api
+   */
+  private async parseSSEResponse(response: Response): Promise<string> {
     const reader = response.body?.getReader();
     if (!reader) {
       throw this.createError('SERVICE_UNAVAILABLE', 'No response body');
     }
-    
+
     const decoder = new TextDecoder();
-    
+    let fullContent = '';
+
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      
+
       const text = decoder.decode(value);
       const lines = text.split('\n');
-      
+
       for (const line of lines) {
         if (line.startsWith('data: ')) {
-          const data = line.slice(6);
+          const data = line.slice(6).trim();
           if (data === '[DONE]') continue;
-          
+
           try {
             const event = JSON.parse(data) as {
-              type: string;
-              delta?: { text?: string };
+              message?: {
+                content?: {
+                  parts?: string[];
+                };
+                status?: string;
+              };
             };
-            
-            if (event.type === 'content_block_delta' && event.delta?.text) {
-              onChunk(event.delta.text);
+
+            // Get the full content from the message
+            const parts = event.message?.content?.parts;
+            if (parts && parts.length > 0) {
+              fullContent = parts.join('');
+            }
+          } catch {
+            // Skip invalid JSON
+          }
+        }
+      }
+    }
+
+    return fullContent;
+  }
+
+  /**
+   * Generate a UUID v4
+   */
+  private generateUUID(): string {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+      const r = (Math.random() * 16) | 0;
+      const v = c === 'x' ? r : (r & 0x3) | 0x8;
+      return v.toString(16);
+    });
+  }
+  
+  /**
+   * Stream chat completion using ChatGPT backend-api
+   * ChatGPT backend-api streams by default via SSE
+   */
+  private async streamChatCompletion(
+    token: string,
+    prompt: string,
+    onChunk: (chunk: string) => void
+  ): Promise<void> {
+    const messageId = this.generateUUID();
+    const parentMessageId = this.generateUUID();
+
+    const response = await fetch(`${CHATGPT_BACKEND_API}/conversation`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        action: 'next',
+        messages: [
+          {
+            id: messageId,
+            author: { role: 'user' },
+            content: {
+              content_type: 'text',
+              parts: [prompt],
+            },
+          },
+        ],
+        parent_message_id: parentMessageId,
+        model: this.currentModel,
+        timezone_offset_min: new Date().getTimezoneOffset(),
+        history_and_training_disabled: true,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw this.createError('SERVICE_UNAVAILABLE', `API error: ${errorText}`);
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) {
+      throw this.createError('SERVICE_UNAVAILABLE', 'No response body');
+    }
+
+    const decoder = new TextDecoder();
+    let lastContent = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      const text = decoder.decode(value);
+      const lines = text.split('\n');
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const data = line.slice(6).trim();
+          if (data === '[DONE]') continue;
+
+          try {
+            const event = JSON.parse(data) as {
+              message?: {
+                content?: {
+                  parts?: string[];
+                };
+              };
+            };
+
+            const parts = event.message?.content?.parts;
+            if (parts && parts.length > 0) {
+              const newContent = parts.join('');
+              // Only send the new portion as a chunk
+              if (newContent.length > lastContent.length) {
+                const chunk = newContent.slice(lastContent.length);
+                onChunk(chunk);
+                lastContent = newContent;
+              }
             }
           } catch {
             // Skip invalid JSON
@@ -447,8 +577,8 @@ IMPORTANT RULES:
 // Factory
 // ============================================================================
 
-export function createClaudeOAuthProvider(
+export function createChatGPTOAuthProvider(
   config?: AuthProvider
-): ClaudeOAuthProvider {
-  return new ClaudeOAuthProvider(config);
+): ChatGPTOAuthProvider {
+  return new ChatGPTOAuthProvider(config);
 }

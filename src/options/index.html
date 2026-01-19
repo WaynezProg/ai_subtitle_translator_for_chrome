@@ -94,65 +94,47 @@
         
         <!-- OAuth Login (Recommended) -->
         <div class="oauth-section">
-          <h3>OAuth 登入 (推薦)</h3>
-          <p class="oauth-desc">使用官方 OAuth 登入，安全且合規。</p>
+          <h3>OAuth 登入</h3>
           <div id="oauth-status" class="oauth-status hidden">
             <span class="status-icon">✓</span>
             已連線
           </div>
+
+          <!-- OAuth Login Button -->
+          <div class="oauth-login-section">
+            <p class="oauth-desc">點擊下方按鈕使用您的帳號登入：</p>
+            <button id="oauth-login" class="btn btn-primary btn-large">
+              <span class="btn-icon">🔐</span>
+              使用 OAuth 登入
+            </button>
+          </div>
+
           <div class="oauth-actions">
-            <button id="oauth-login" class="btn btn-primary">使用 OAuth 登入</button>
+            <button id="oauth-validate" class="btn btn-secondary hidden">驗證 Token</button>
             <button id="oauth-logout" class="btn btn-danger hidden">登出</button>
           </div>
+
+          <!-- Manual Token Input (Advanced) -->
+          <details class="manual-token-section">
+            <summary>手動輸入 Token (進階)</summary>
+            <div class="manual-token-content">
+              <p class="token-help">
+                如果 OAuth 登入失敗，可使用 <code>tools/session-helper</code> 取得 Token：<br>
+                <code>python session_helper.py claude -y</code> 或 <code>python session_helper.py chatgpt -y</code>
+              </p>
+              <div class="form-group">
+                <label for="oauth-access-token">Access Token</label>
+                <input type="password" id="oauth-access-token" placeholder="貼上 accessToken" autocomplete="off">
+              </div>
+              <div class="form-group">
+                <label for="oauth-refresh-token">Refresh Token (選填)</label>
+                <input type="password" id="oauth-refresh-token" placeholder="貼上 refreshToken" autocomplete="off">
+              </div>
+              <button id="oauth-save-token" class="btn btn-secondary">儲存 Token</button>
+            </div>
+          </details>
         </div>
         
-        <hr class="section-divider">
-        
-        <!-- Legacy Session-based Login -->
-        <details class="legacy-login">
-          <summary>舊版登入方式 (不建議)</summary>
-          <div class="subscription-warning">
-            <span class="warning-icon">⚠️</span>
-            <div class="warning-content">
-              <strong>使用條款提醒</strong>
-              <p>此功能透過瀏覽器 Session 存取您的訂閱帳號，可能違反服務條款。請自行承擔使用風險。</p>
-            </div>
-          </div>
-          <div class="subscription-steps">
-            <h3>設定步驟</h3>
-            <ol>
-              <li>
-                <span class="step-number">1</span>
-                <div class="step-content">
-                  <strong>登入服務</strong>
-                  <p>請先在新分頁中登入您的帳號</p>
-                  <button id="open-login-page" class="btn btn-secondary">開啟登入頁面</button>
-                </div>
-              </li>
-              <li>
-                <span class="step-number">2</span>
-                <div class="step-content">
-                  <strong>驗證連線</strong>
-                  <p>登入後點擊下方按鈕驗證</p>
-                  <button id="verify-subscription" class="btn btn-primary">驗證訂閱狀態</button>
-                </div>
-              </li>
-            </ol>
-          </div>
-          <div id="subscription-status" class="subscription-status hidden">
-            <div class="status-icon">✅</div>
-            <div class="status-text">
-              <strong>已連線</strong>
-              <p id="subscription-account-info">帳號資訊載入中...</p>
-            </div>
-          </div>
-          <div class="form-group">
-            <label>
-              <input type="checkbox" id="accept-tos-disclaimer">
-              我了解並接受使用此功能的風險
-            </label>
-          </div>
-        </details>
       </section>
 
       <section id="ollama-section" class="options-section hidden">

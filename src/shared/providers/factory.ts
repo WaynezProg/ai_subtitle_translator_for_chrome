@@ -114,16 +114,19 @@ export class ProviderNotRegisteredError extends Error {
 
 import { ClaudeApiProvider } from './claude-api-provider';
 import { OpenAIApiProvider } from './openai-api-provider';
-import { ClaudeSubscriptionProvider } from './claude-subscription-provider';
-import { ChatGPTSubscriptionProvider } from './chatgpt-subscription-provider';
+import { ClaudeOAuthProvider } from './claude-oauth-provider';
+import { ChatGPTOAuthProvider } from './chatgpt-oauth-provider';
 import { OllamaProvider } from './ollama-provider';
 import { GoogleTranslateProvider } from './google-translate-provider';
 
 // Register all available providers
+// Note: claude-subscription and chatgpt-subscription now use OAuth providers
+// The old session-based providers (ClaudeSubscriptionProvider, ChatGPTSubscriptionProvider)
+// are deprecated and kept only for backward compatibility
 ProviderFactory.register('claude-api', (config) => new ClaudeApiProvider(config));
 ProviderFactory.register('openai-api', (config) => new OpenAIApiProvider(config));
-ProviderFactory.register('claude-subscription', (config) => new ClaudeSubscriptionProvider(config));
-ProviderFactory.register('chatgpt-subscription', (config) => new ChatGPTSubscriptionProvider(config));
+ProviderFactory.register('claude-subscription', (config) => new ClaudeOAuthProvider(config));
+ProviderFactory.register('chatgpt-subscription', (config) => new ChatGPTOAuthProvider(config));
 ProviderFactory.register('ollama', (config) => new OllamaProvider(config));
 ProviderFactory.register('google-translate', (config) => new GoogleTranslateProvider(config));
 
@@ -153,7 +156,8 @@ export function createProviderFromConfig(
   } else if (providerType === 'google-translate') {
     credentials = { type: 'google-translate' };
   } else if (providerType.includes('subscription')) {
-    credentials = { type: 'subscription', encryptedSessionToken: '' };
+    // Subscription providers now use OAuth credentials
+    credentials = { type: 'oauth', accessToken: '' };
   } else {
     credentials = { type: 'api-key', encryptedApiKey: apiKey || '', model: model || '' };
   }

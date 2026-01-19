@@ -22,6 +22,8 @@ import type {
   TranslateTextResponse,
   SaveTranslationMessage,
   SaveTranslationResponse,
+  ValidateOAuthTokenMessage,
+  ValidateOAuthTokenResponse,
   Response,
   BackgroundToContentMessage,
 } from '../shared/types/messages';
@@ -49,6 +51,7 @@ interface MessageHandlers {
   GET_AUTH_STATUS: HandlerFunction<GetAuthStatusMessage, GetAuthStatusResponse>;
   TRANSLATE_TEXT: HandlerFunction<TranslateTextMessage, TranslateTextResponse>;
   SAVE_TRANSLATION: HandlerFunction<SaveTranslationMessage, SaveTranslationResponse>;
+  VALIDATE_OAUTH_TOKEN: HandlerFunction<ValidateOAuthTokenMessage, ValidateOAuthTokenResponse>;
 }
 
 // ============================================================================

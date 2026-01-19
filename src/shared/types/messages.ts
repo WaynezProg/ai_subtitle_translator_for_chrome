@@ -110,17 +110,32 @@ export interface GetAuthStatusResponse extends Response<{
 }> {}
 
 /**
+ * Context from previous translation batch for consistency
+ */
+export interface TranslationContextPayload {
+  /** Last few translated cues from previous batch */
+  previousCues?: Array<{
+    original: string;
+    translated: string;
+  }>;
+}
+
+/**
  * TRANSLATE_TEXT: Request to translate a single text (for real-time translation)
  */
 export interface TranslateTextMessage extends Message<'TRANSLATE_TEXT', {
   text: string;
   sourceLanguage: string;
   targetLanguage: string;
+  /** Optional context from previous batch for better translation consistency */
+  context?: TranslationContextPayload;
 }> {}
 
 export interface TranslateTextResponse extends Response<{
   translatedText: string;
   cached: boolean;
+  /** Context to pass to next batch */
+  context?: TranslationContextPayload;
 }> {}
 
 /**
@@ -136,6 +151,19 @@ export interface SaveTranslationMessage extends Message<'SAVE_TRANSLATION', {
 
 export interface SaveTranslationResponse extends Response<{
   saved: boolean;
+}> {}
+
+/**
+ * VALIDATE_OAUTH_TOKEN: Validate OAuth token via background script (to avoid CORS)
+ */
+export interface ValidateOAuthTokenMessage extends Message<'VALIDATE_OAUTH_TOKEN', {
+  provider: 'claude' | 'chatgpt';
+  accessToken: string;
+}> {}
+
+export interface ValidateOAuthTokenResponse extends Response<{
+  valid: boolean;
+  error?: string;
 }> {}
 
 // ============================================================================
@@ -203,7 +231,8 @@ export type ContentToBackgroundMessage =
   | GetCachedTranslationMessage
   | GetAuthStatusMessage
   | TranslateTextMessage
-  | SaveTranslationMessage;
+  | SaveTranslationMessage
+  | ValidateOAuthTokenMessage;
 
 /**
  * All background to content script messages

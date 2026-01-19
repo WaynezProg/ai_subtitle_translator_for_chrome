@@ -18,16 +18,16 @@ import {
 } from '../shared/utils/auth-storage';
 import { createProviderFromConfig } from '../shared/providers/factory';
 import {
-  launchClaudeOAuthFlow,
   getStoredClaudeTokens,
+  storeClaudeTokens,
   clearClaudeTokens,
-  validateClaudeToken,
+  launchClaudeOAuthFlow,
 } from '../shared/providers/claude-oauth';
 import {
-  launchChatGPTOAuthFlow,
   getStoredChatGPTTokens,
+  storeChatGPTTokens,
   clearChatGPTTokens,
-  validateChatGPTToken,
+  launchChatGPTOAuthFlow,
 } from '../shared/providers/chatgpt-oauth';
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -147,90 +147,214 @@ function initApiKeySection(): void {
 }
 
 function initSubscriptionSection(): void {
-  // OAuth Login button (new recommended method)
+  // OAuth Login button (main action)
   const oauthLoginBtn = document.getElementById('oauth-login');
   oauthLoginBtn?.addEventListener('click', () => {
     void handleOAuthLogin();
   });
-  
+
+  // OAuth Save Token button (manual token input)
+  const oauthSaveBtn = document.getElementById('oauth-save-token');
+  oauthSaveBtn?.addEventListener('click', () => {
+    void handleSaveOAuthToken();
+  });
+
+  // OAuth Validate button
+  const oauthValidateBtn = document.getElementById('oauth-validate');
+  oauthValidateBtn?.addEventListener('click', () => {
+    void handleValidateOAuthToken();
+  });
+
   // OAuth Logout button
   const oauthLogoutBtn = document.getElementById('oauth-logout');
   oauthLogoutBtn?.addEventListener('click', () => {
     void handleOAuthLogout();
   });
-  
-  // Open login page button (legacy fallback)
-  const openLoginBtn = document.getElementById('open-login-page');
-  openLoginBtn?.addEventListener('click', () => {
-    const providerRadio = document.querySelector('input[name="provider"]:checked') as HTMLInputElement;
-    const providerType = providerRadio?.value as ProviderType;
-    
-    const loginUrls: Record<string, string> = {
-      'claude-subscription': 'https://claude.ai/login',
-      'chatgpt-subscription': 'https://chat.openai.com/auth/login',
-    };
-    
-    const url = loginUrls[providerType];
-    if (url) {
-      window.open(url, '_blank');
-    }
-  });
-  
-  // Verify subscription button
-  const verifyBtn = document.getElementById('verify-subscription');
-  verifyBtn?.addEventListener('click', () => {
-    void verifySubscription();
-  });
-  
-  // ToS disclaimer checkbox
-  const tosCheckbox = document.getElementById('accept-tos-disclaimer') as HTMLInputElement;
-  tosCheckbox?.addEventListener('change', () => {
-    void saveToSAcceptance(tosCheckbox.checked);
-  });
 }
 
+/**
+ * Handle OAuth Login button click
+ * Launches the OAuth PKCE flow using chrome.identity.launchWebAuthFlow
+ */
 async function handleOAuthLogin(): Promise<void> {
   const providerRadio = document.querySelector('input[name="provider"]:checked') as HTMLInputElement;
   const providerType = providerRadio?.value as ProviderType;
-  
+
   if (providerType !== 'claude-subscription' && providerType !== 'chatgpt-subscription') {
-    showNotification('OAuth 登入僅支援 Claude Pro 和 ChatGPT Plus', 'error');
+    showNotification('請先選擇 Claude Pro 或 ChatGPT Plus', 'error');
     return;
   }
-  
+
   const loginBtn = document.getElementById('oauth-login') as HTMLButtonElement;
   if (loginBtn) {
     loginBtn.disabled = true;
-    loginBtn.textContent = '登入中...';
+    loginBtn.innerHTML = '<span class="btn-icon">⏳</span> 登入中...';
   }
-  
+
   try {
-    let accessToken: string;
-    
+    const providerName = providerType === 'claude-subscription' ? 'Claude' : 'ChatGPT';
+
     if (providerType === 'claude-subscription') {
       const tokens = await launchClaudeOAuthFlow();
-      accessToken = tokens.accessToken;
+      console.log('[Options] Claude OAuth success, tokens received');
+      showNotification(`${providerName} 登入成功！`);
     } else {
       const tokens = await launchChatGPTOAuthFlow();
-      accessToken = tokens.accessToken;
+      console.log('[Options] ChatGPT OAuth success, tokens received');
+      showNotification(`${providerName} 登入成功！`);
     }
-    
-    // Save the OAuth credentials
-    await saveProviderCredentials(providerType, accessToken, undefined);
-    
-    const providerName = providerType === 'claude-subscription' ? 'Claude' : 'ChatGPT';
-    showNotification(`${providerName} OAuth 登入成功！`);
-    
+
     // Update UI to show logged in state
     await loadSubscriptionStatus(providerType);
   } catch (error) {
     console.error('[Options] OAuth login failed:', error);
-    const message = error instanceof Error ? error.message : 'OAuth 登入失敗';
-    showNotification(message, 'error');
+    const message = error instanceof Error ? error.message : '登入失敗';
+
+    // Provide more helpful error messages
+    if (message.includes('cancelled') || message.includes('canceled')) {
+      showNotification('登入已取消', 'error');
+    } else if (message.includes('User interaction required')) {
+      showNotification('請在彈出視窗中完成登入', 'error');
+    } else {
+      showNotification(`登入失敗: ${message}`, 'error');
+    }
   } finally {
     if (loginBtn) {
       loginBtn.disabled = false;
-      loginBtn.textContent = '使用 OAuth 登入';
+      loginBtn.innerHTML = '<span class="btn-icon">🔐</span> 使用 OAuth 登入';
+    }
+  }
+}
+
+async function handleSaveOAuthToken(): Promise<void> {
+  const providerRadio = document.querySelector('input[name="provider"]:checked') as HTMLInputElement;
+  const providerType = providerRadio?.value as ProviderType;
+  
+  if (providerType !== 'claude-subscription' && providerType !== 'chatgpt-subscription') {
+    showNotification('OAuth Token 僅支援 Claude Pro 和 ChatGPT Plus', 'error');
+    return;
+  }
+  
+  const accessTokenInput = document.getElementById('oauth-access-token') as HTMLInputElement;
+  const refreshTokenInput = document.getElementById('oauth-refresh-token') as HTMLInputElement;
+  
+  const accessToken = accessTokenInput?.value.trim();
+  const refreshToken = refreshTokenInput?.value.trim();
+  
+  if (!accessToken) {
+    showNotification('請輸入 Access Token', 'error');
+    return;
+  }
+  
+  const saveBtn = document.getElementById('oauth-save-token') as HTMLButtonElement;
+  if (saveBtn) {
+    saveBtn.disabled = true;
+    saveBtn.textContent = '儲存中...';
+  }
+  
+  try {
+    // Store OAuth tokens
+    const tokens = {
+      accessToken,
+      refreshToken: refreshToken || undefined,
+      expiresAt: new Date(Date.now() + 3600 * 1000).toISOString(), // Default 1 hour
+    };
+    
+    if (providerType === 'claude-subscription') {
+      await storeClaudeTokens(tokens);
+    } else {
+      await storeChatGPTTokens(tokens);
+    }
+    
+    // Clear input fields
+    accessTokenInput.value = '';
+    refreshTokenInput.value = '';
+    
+    const providerName = providerType === 'claude-subscription' ? 'Claude' : 'ChatGPT';
+    showNotification(`${providerName} Token 已儲存！`);
+    
+    // Update UI to show logged in state
+    await loadSubscriptionStatus(providerType);
+  } catch (error) {
+    console.error('[Options] Save OAuth token failed:', error);
+    const message = error instanceof Error ? error.message : '儲存 Token 失敗';
+    showNotification(message, 'error');
+  } finally {
+    if (saveBtn) {
+      saveBtn.disabled = false;
+      saveBtn.textContent = '儲存 Token';
+    }
+  }
+}
+
+async function handleValidateOAuthToken(): Promise<void> {
+  const providerRadio = document.querySelector('input[name="provider"]:checked') as HTMLInputElement;
+  const providerType = providerRadio?.value as ProviderType;
+
+  if (providerType !== 'claude-subscription' && providerType !== 'chatgpt-subscription') {
+    showNotification('請先選擇 Claude Pro 或 ChatGPT Plus', 'error');
+    return;
+  }
+
+  const validateBtn = document.getElementById('oauth-validate') as HTMLButtonElement;
+  if (validateBtn) {
+    validateBtn.disabled = true;
+    validateBtn.textContent = '驗證中...';
+  }
+
+  try {
+    let accessToken: string | null = null;
+    const providerName = providerType === 'claude-subscription' ? 'Claude' : 'ChatGPT';
+    const providerKey = providerType === 'claude-subscription' ? 'claude' : 'chatgpt';
+
+    if (providerType === 'claude-subscription') {
+      const tokens = await getStoredClaudeTokens();
+      accessToken = tokens?.accessToken || null;
+    } else {
+      const tokens = await getStoredChatGPTTokens();
+      accessToken = tokens?.accessToken || null;
+    }
+
+    if (!accessToken) {
+      showNotification(`尚未設定 ${providerName} Token，請先登入`, 'error');
+      return;
+    }
+
+    // Validate via background script to avoid CORS issues
+    const response = await chrome.runtime.sendMessage({
+      type: 'VALIDATE_OAUTH_TOKEN',
+      payload: {
+        provider: providerKey,
+        accessToken,
+      },
+    });
+
+    if (response?.success && response?.data?.valid) {
+      showNotification('Token 驗證成功！');
+      await loadSubscriptionStatus(providerType);
+    } else {
+      // Provide more helpful error message
+      const errorDetail = response?.data?.error || '';
+      let helpText = providerType === 'claude-subscription'
+        ? '可能原因：Token 過期、未通過 OAuth 登入取得、或缺少必要權限'
+        : '可能原因：Token 過期、未通過 OAuth 登入取得、或缺少 model.request 權限';
+
+      if (errorDetail.includes('model.request')) {
+        helpText = 'Token 缺少 model.request 權限。請使用 opencode 重新登入取得新 token。';
+      } else if (errorDetail.includes('CORS')) {
+        helpText = 'CORS 錯誤，請稍後再試。';
+      }
+
+      showNotification(`Token 無效或已過期。${helpText}`, 'error');
+    }
+  } catch (error) {
+    console.error('[Options] Validate OAuth token failed:', error);
+    const message = error instanceof Error ? error.message : '驗證失敗';
+    showNotification(`驗證失敗: ${message}`, 'error');
+  } finally {
+    if (validateBtn) {
+      validateBtn.disabled = false;
+      validateBtn.textContent = '驗證 Token';
     }
   }
 }
@@ -238,194 +362,113 @@ async function handleOAuthLogin(): Promise<void> {
 async function handleOAuthLogout(): Promise<void> {
   const providerRadio = document.querySelector('input[name="provider"]:checked') as HTMLInputElement;
   const providerType = providerRadio?.value as ProviderType;
-  
+
   try {
     if (providerType === 'claude-subscription') {
       await clearClaudeTokens();
     } else if (providerType === 'chatgpt-subscription') {
       await clearChatGPTTokens();
     }
-    
+
     await deleteProviderCredentials(providerType);
-    
+
     showNotification('已登出');
-    
+
     // Update UI
     const statusEl = document.getElementById('subscription-status');
     const oauthStatusEl = document.getElementById('oauth-status');
+    const oauthLoginSection = document.querySelector('.oauth-login-section') as HTMLElement;
+    const validateBtn = document.getElementById('oauth-validate');
+    const logoutBtn = document.getElementById('oauth-logout');
+
     statusEl?.classList.add('hidden');
     oauthStatusEl?.classList.add('hidden');
-    
-    // Show login button, hide logout button
-    const loginBtn = document.getElementById('oauth-login');
-    const logoutBtn = document.getElementById('oauth-logout');
-    loginBtn?.classList.remove('hidden');
+
+    // Show login section after logout
+    oauthLoginSection?.classList.remove('hidden');
+
+    // Hide validate and logout buttons
+    validateBtn?.classList.add('hidden');
     logoutBtn?.classList.add('hidden');
+
+    // Clear manual token input fields
+    const accessTokenInput = document.getElementById('oauth-access-token') as HTMLInputElement;
+    const refreshTokenInput = document.getElementById('oauth-refresh-token') as HTMLInputElement;
+    if (accessTokenInput) accessTokenInput.value = '';
+    if (refreshTokenInput) refreshTokenInput.value = '';
   } catch (error) {
     console.error('[Options] Logout failed:', error);
     showNotification('登出失敗', 'error');
   }
 }
 
-async function verifySubscription(): Promise<void> {
-  const verifyBtn = document.getElementById('verify-subscription') as HTMLButtonElement;
-  const statusEl = document.getElementById('subscription-status');
-  const accountInfoEl = document.getElementById('subscription-account-info');
-  
-  const providerRadio = document.querySelector('input[name="provider"]:checked') as HTMLInputElement;
-  const providerType = providerRadio?.value as ProviderType;
-  
-  if (!providerType) return;
-  
-  if (verifyBtn) {
-    verifyBtn.disabled = true;
-    verifyBtn.textContent = '驗證中...';
-  }
-  
-  try {
-    // Create provider and validate
-    const provider = createProviderFromConfig(providerType);
-    
-    if (!provider) {
-      throw new Error('無法建立 Provider');
-    }
-    
-    const result = await provider.validateCredentials();
-    
-    if (result.valid) {
-      statusEl?.classList.remove('hidden');
-      statusEl?.classList.add('success');
-      if (accountInfoEl) {
-        accountInfoEl.textContent = result.accountInfo?.tier || '訂閱帳號已連線';
-      }
-      showNotification('訂閱驗證成功！');
-      
-      // Save subscription status
-      await saveProviderCredentials(providerType, 'session-based', undefined);
-    } else {
-      statusEl?.classList.remove('hidden');
-      statusEl?.classList.remove('success');
-      statusEl?.classList.add('error');
-      if (accountInfoEl) {
-        accountInfoEl.textContent = result.error?.message || '驗證失敗';
-      }
-      showNotification(result.error?.message || '驗證失敗，請確認已登入', 'error');
-    }
-  } catch (error) {
-    console.error('[Options] Subscription verification error:', error);
-    statusEl?.classList.add('hidden');
-    showNotification('驗證過程發生錯誤，請確認已在瀏覽器中登入', 'error');
-  } finally {
-    if (verifyBtn) {
-      verifyBtn.disabled = false;
-      verifyBtn.textContent = '驗證訂閱狀態';
-    }
-  }
-}
-
 async function loadSubscriptionStatus(providerType: ProviderType): Promise<void> {
-  const statusEl = document.getElementById('subscription-status');
-  const accountInfoEl = document.getElementById('subscription-account-info');
   const oauthStatusEl = document.getElementById('oauth-status');
-  const tosCheckbox = document.getElementById('accept-tos-disclaimer') as HTMLInputElement;
-  const loginBtn = document.getElementById('oauth-login');
+  const oauthLoginSection = document.querySelector('.oauth-login-section') as HTMLElement;
+  const validateBtn = document.getElementById('oauth-validate');
   const logoutBtn = document.getElementById('oauth-logout');
-  
+
   try {
     // Check for OAuth tokens first
     if (providerType === 'claude-subscription') {
       const tokens = await getStoredClaudeTokens();
-      
+
       if (tokens?.accessToken) {
-        // Validate the token
-        const isValid = await validateClaudeToken(tokens.accessToken);
-        
-        if (isValid) {
-          oauthStatusEl?.classList.remove('hidden');
-          oauthStatusEl?.classList.add('success');
-          if (oauthStatusEl) {
-            oauthStatusEl.innerHTML = '<span class="status-icon">✓</span> Claude Pro (OAuth) 已連線';
-          }
-          
-          // Show logout button, hide login button
-          loginBtn?.classList.add('hidden');
-          logoutBtn?.classList.remove('hidden');
-          
-          return;
-        } else {
-          // Token invalid, clear it
-          await clearClaudeTokens();
+        // Show connected status (don't validate on every load to avoid rate limits)
+        oauthStatusEl?.classList.remove('hidden');
+        oauthStatusEl?.classList.add('success');
+        if (oauthStatusEl) {
+          const hasRefresh = tokens.refreshToken ? ' (含 Refresh Token)' : '';
+          oauthStatusEl.innerHTML = `<span class="status-icon">✓</span> Claude Pro 已連線${hasRefresh}`;
         }
+
+        // Hide login section when connected
+        oauthLoginSection?.classList.add('hidden');
+
+        // Show logout and validate buttons
+        validateBtn?.classList.remove('hidden');
+        logoutBtn?.classList.remove('hidden');
+
+        return;
       }
-      
-      // No valid OAuth token, show login button
+
+      // No OAuth token, show login section
       oauthStatusEl?.classList.add('hidden');
-      loginBtn?.classList.remove('hidden');
+      oauthLoginSection?.classList.remove('hidden');
+      validateBtn?.classList.add('hidden');
       logoutBtn?.classList.add('hidden');
     } else if (providerType === 'chatgpt-subscription') {
       const tokens = await getStoredChatGPTTokens();
-      
+
       if (tokens?.accessToken) {
-        // Validate the token
-        const isValid = await validateChatGPTToken(tokens.accessToken);
-        
-        if (isValid) {
-          oauthStatusEl?.classList.remove('hidden');
-          oauthStatusEl?.classList.add('success');
-          if (oauthStatusEl) {
-            oauthStatusEl.innerHTML = '<span class="status-icon">✓</span> ChatGPT Plus (OAuth) 已連線';
-          }
-          
-          // Show logout button, hide login button
-          loginBtn?.classList.add('hidden');
-          logoutBtn?.classList.remove('hidden');
-          
-          return;
-        } else {
-          // Token invalid, clear it
-          await clearChatGPTTokens();
+        // Show connected status
+        oauthStatusEl?.classList.remove('hidden');
+        oauthStatusEl?.classList.add('success');
+        if (oauthStatusEl) {
+          const hasRefresh = tokens.refreshToken ? ' (含 Refresh Token)' : '';
+          oauthStatusEl.innerHTML = `<span class="status-icon">✓</span> ChatGPT Plus 已連線${hasRefresh}`;
         }
+
+        // Hide login section when connected
+        oauthLoginSection?.classList.add('hidden');
+
+        // Show logout and validate buttons
+        validateBtn?.classList.remove('hidden');
+        logoutBtn?.classList.remove('hidden');
+
+        return;
       }
-      
-      // No valid OAuth token, show login button
+
+      // No OAuth token, show login section
       oauthStatusEl?.classList.add('hidden');
-      loginBtn?.classList.remove('hidden');
+      oauthLoginSection?.classList.remove('hidden');
+      validateBtn?.classList.add('hidden');
       logoutBtn?.classList.add('hidden');
     }
     
-    // Fall back to legacy session-based auth check
-    const authProvider = await getAuthProvider(providerType);
-    
-    if (authProvider?.status === 'valid') {
-      statusEl?.classList.remove('hidden');
-      statusEl?.classList.add('success');
-      if (accountInfoEl) {
-        accountInfoEl.textContent = authProvider.displayName || '訂閱帳號已連線';
-      }
-    } else {
-      statusEl?.classList.add('hidden');
-    }
-    
-    // Load ToS acceptance status
-    const result = await chrome.storage.local.get(['preferences']);
-    if (tosCheckbox && result.preferences?.acceptedSubscriptionDisclaimer) {
-      tosCheckbox.checked = true;
-    }
   } catch (error) {
     console.error('[Options] Failed to load subscription status:', error);
-    statusEl?.classList.add('hidden');
     oauthStatusEl?.classList.add('hidden');
-  }
-}
-
-async function saveToSAcceptance(accepted: boolean): Promise<void> {
-  try {
-    const result = await chrome.storage.local.get(['preferences']);
-    const preferences = result.preferences || {};
-    preferences.acceptedSubscriptionDisclaimer = accepted;
-    await chrome.storage.local.set({ preferences });
-  } catch (error) {
-    console.error('[Options] Failed to save ToS acceptance:', error);
   }
 }
 

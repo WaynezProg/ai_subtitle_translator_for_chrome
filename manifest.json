@@ -7,8 +7,19 @@
     "storage",
     "activeTab",
     "scripting",
-    "identity"
+    "identity",
+    "declarativeNetRequest",
+    "declarativeNetRequestWithHostAccess"
   ],
+  "declarative_net_request": {
+    "rule_resources": [
+      {
+        "id": "remove_cors_headers",
+        "enabled": true,
+        "path": "rules/remove_cors.json"
+      }
+    ]
+  },
   "host_permissions": [
     "*://*.youtube.com/*",
     "*://*.netflix.com/*",
@@ -17,6 +28,10 @@
     "*://*.amazon.com/gp/video/*",
     "https://api.anthropic.com/*",
     "https://api.openai.com/*",
+    "https://chatgpt.com/*",
+    "https://console.anthropic.com/*",
+    "https://claude.ai/*",
+    "https://auth.openai.com/*",
     "http://localhost:11434/*"
   ],
   "background": {

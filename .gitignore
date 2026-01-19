@@ -49,3 +49,5 @@ coverage/
 # Specs (development planning docs)
 specs/
 openspec/
+
+*.session.json

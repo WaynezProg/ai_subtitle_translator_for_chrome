@@ -10,7 +10,6 @@
 import {
   startPKCEFlow,
   completePKCEFlow,
-  buildAuthorizationUrl,
 } from './oauth-pkce';
 
 // ============================================================================
@@ -18,20 +17,17 @@ import {
 // ============================================================================
 
 const CHATGPT_OAUTH_CONFIG = {
-  // OAuth client ID for ChatGPT (from opencode)
+  // OAuth client ID for ChatGPT (from opencode-openai-codex-auth)
   clientId: 'app_EMoamEEZ73f0CkXaXp7hrann',
-  
-  // OAuth endpoints (using OpenAI's auth issuer)
+
+  // OAuth endpoints - IMPORTANT: must include /oauth/ path segment
   issuer: 'https://auth.openai.com',
-  authorizationUrl: 'https://auth.openai.com/authorize',
+  authorizationUrl: 'https://auth.openai.com/oauth/authorize',
   tokenUrl: 'https://auth.openai.com/oauth/token',
-  
-  // Required scopes
-  scopes: ['openid', 'email', 'profile'],
-  
-  // API endpoints for using the token
-  apiBaseUrl: 'https://chatgpt.com',
-  chatEndpoint: '/backend-api/conversation',
+
+  // Required scopes for ChatGPT Plus/Pro access
+  // offline_access is required for refresh tokens
+  scopes: ['openid', 'profile', 'email', 'offline_access'],
 };
 
 // Redirect URI will be the extension's callback
@@ -73,16 +69,20 @@ export async function startChatGPTOAuth(): Promise<string> {
   // Generate PKCE challenge
   const { codeChallenge, codeChallengeMethod, state } = await startPKCEFlow(providerType);
   
-  // Build authorization URL with additional OpenID Connect parameters
+  // Build authorization URL with Codex CLI compatible parameters
+  // Reference: opencode-openai-codex-auth/lib/auth/auth.ts
   const url = new URL(CHATGPT_OAUTH_CONFIG.authorizationUrl);
+  url.searchParams.set('response_type', 'code');
   url.searchParams.set('client_id', CHATGPT_OAUTH_CONFIG.clientId);
   url.searchParams.set('redirect_uri', getRedirectUri());
-  url.searchParams.set('response_type', 'code');
   url.searchParams.set('scope', CHATGPT_OAUTH_CONFIG.scopes.join(' '));
   url.searchParams.set('code_challenge', codeChallenge);
   url.searchParams.set('code_challenge_method', codeChallengeMethod);
   url.searchParams.set('state', state);
-  url.searchParams.set('audience', 'https://api.openai.com/v1');
+  // Codex CLI specific parameters that help with the OAuth flow
+  url.searchParams.set('id_token_add_organizations', 'true');
+  url.searchParams.set('codex_cli_simplified_flow', 'true');
+  url.searchParams.set('originator', 'codex_cli_rs');
   
   return url.toString();
 }
@@ -157,88 +157,50 @@ export async function refreshChatGPTToken(refreshToken: string): Promise<ChatGPT
 
 /**
  * Validate the access token by making a test API call
+ *
+ * ChatGPT OAuth tokens work with ChatGPT backend-api.
+ * We validate by checking the /me endpoint which returns user info.
  */
 export async function validateChatGPTToken(accessToken: string): Promise<boolean> {
   try {
-    // Try to make a simple API call to validate the token
-    const response = await fetch(`${CHATGPT_OAUTH_CONFIG.apiBaseUrl}/backend-api/me`, {
+    // Use ChatGPT backend-api /me endpoint to validate the token
+    const response = await fetch('https://chatgpt.com/backend-api/me', {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${accessToken}`,
       },
     });
-    
-    return response.ok;
-  } catch {
+
+    console.log('[ChatGPTOAuth] Validation response status:', response.status);
+
+    // 200 = success, token is valid
+    if (response.ok) {
+      const data = await response.json() as { id?: string; email?: string };
+      console.log('[ChatGPTOAuth] User validated:', data.email || data.id || 'unknown');
+      return true;
+    }
+
+    // 401/403 = token is invalid or expired
+    if (response.status === 401 || response.status === 403) {
+      const errorText = await response.text();
+      console.warn('[ChatGPTOAuth] Validation failed:', response.status, errorText);
+      return false;
+    }
+
+    // 429 = rate limited but token is valid
+    if (response.status === 429) {
+      console.warn('[ChatGPTOAuth] Rate limited, but token is valid');
+      return true;
+    }
+
+    // Other errors might be temporary
+    const errorText = await response.text();
+    console.warn('[ChatGPTOAuth] Validation error:', response.status, errorText);
+    return false;
+  } catch (error) {
+    console.error('[ChatGPTOAuth] Token validation error:', error);
     return false;
   }
-}
-
-/**
- * Make a chat request using the OAuth token
- */
-export async function chatWithChatGPTOAuth(
-  accessToken: string,
-  messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>,
-  model: string = 'gpt-4'
-): Promise<string> {
-  // ChatGPT uses a different API format for conversations
-  const response = await fetch(`${CHATGPT_OAUTH_CONFIG.apiBaseUrl}${CHATGPT_OAUTH_CONFIG.chatEndpoint}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${accessToken}`,
-    },
-    body: JSON.stringify({
-      action: 'next',
-      messages: messages.map((m, i) => ({
-        id: crypto.randomUUID(),
-        author: { role: m.role },
-        content: { content_type: 'text', parts: [m.content] },
-        metadata: {},
-      })),
-      model,
-      parent_message_id: crypto.randomUUID(),
-    }),
-  });
-  
-  if (!response.ok) {
-    const errorText = await response.text();
-    
-    if (response.status === 401) {
-      throw new Error('TOKEN_EXPIRED');
-    }
-    
-    throw new Error(`ChatGPT API error: ${response.status} - ${errorText}`);
-  }
-  
-  // ChatGPT returns server-sent events
-  const text = await response.text();
-  const lines = text.split('\n').filter(line => line.startsWith('data: '));
-  
-  let fullResponse = '';
-  for (const line of lines) {
-    const data = line.slice(6);
-    if (data === '[DONE]') continue;
-    
-    try {
-      const parsed = JSON.parse(data) as {
-        message?: {
-          content?: {
-            parts?: string[];
-          };
-        };
-      };
-      
-      if (parsed.message?.content?.parts) {
-        fullResponse = parsed.message.content.parts.join('');
-      }
-    } catch {
-      // Skip invalid JSON
-    }
-  }
-  
-  return fullResponse;
 }
 
 /**
@@ -270,7 +232,7 @@ export async function launchChatGPTOAuthFlow(): Promise<ChatGPTOAuthTokens> {
         url: authUrl,
         interactive: true,
       },
-      async (redirectUrl) => {
+      (redirectUrl) => {
         if (chrome.runtime.lastError) {
           reject(new Error(chrome.runtime.lastError.message));
           return;
@@ -281,7 +243,8 @@ export async function launchChatGPTOAuthFlow(): Promise<ChatGPTOAuthTokens> {
           return;
         }
         
-        try {
+        // Process the callback asynchronously
+        const processCallback = async (): Promise<void> => {
           // Parse the redirect URL to get the authorization code
           const url = new URL(redirectUrl);
           const code = url.searchParams.get('code');
@@ -289,21 +252,19 @@ export async function launchChatGPTOAuthFlow(): Promise<ChatGPTOAuthTokens> {
           const error = url.searchParams.get('error');
           
           if (error) {
-            reject(new Error(`OAuth error: ${error}`));
-            return;
+            throw new Error(`OAuth error: ${error}`);
           }
           
           if (!code || !state) {
-            reject(new Error('Missing authorization code or state'));
-            return;
+            throw new Error('Missing authorization code or state');
           }
           
           // Exchange the code for tokens
           const tokens = await completeChatGPTOAuth(code, state);
           resolve(tokens);
-        } catch (err) {
-          reject(err);
-        }
+        };
+        
+        processCallback().catch(reject);
       }
     );
   });
