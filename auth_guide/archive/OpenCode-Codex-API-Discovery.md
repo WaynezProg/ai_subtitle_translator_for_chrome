@@ -470,13 +470,15 @@ class OpenCodeCodexClient:
 
         return True
 
-    def chat(self, message: str, model: str = "gpt-4o") -> str:
+    def chat(self, message: str, model: str = "gpt-5-codex-mini", instructions: str = None) -> str:
         """
         發送訊息到 Codex API
 
         Args:
             message: 用戶訊息
-            model: 模型名稱 (gpt-4o, gpt-4-turbo, etc.)
+            model: 模型名稱 (gpt-5, gpt-5-codex, gpt-5-codex-mini, etc.)
+                   注意：Codex API 不支援 GPT-4 系列，只支援 GPT-5 系列
+            instructions: 系統指令（可選）
 
         Returns:
             AI 回應文字
@@ -493,33 +495,54 @@ class OpenCodeCodexClient:
         if self.account_id:
             headers["ChatGPT-Account-Id"] = self.account_id
 
+        # Codex API 使用不同的請求格式，且必須使用串流
         payload = {
             "model": model,
-            "messages": [
-                {"role": "user", "content": message}
+            "instructions": instructions or "You are a helpful assistant.",
+            "input": [
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": message}]
+                }
             ],
-            "stream": False
+            "stream": True,  # Codex API 必須使用串流
+            "store": False
         }
 
         response = requests.post(
             self.CODEX_API,
             headers=headers,
-            json=payload
+            json=payload,
+            stream=True
         )
 
         if response.status_code != 200:
             raise Exception(f"API error: {response.status_code} - {response.text}")
 
-        data = response.json()
-        return data.get("choices", [{}])[0].get("message", {}).get("content", "")
+        # 解析 SSE 串流回應
+        full_response = ""
+        for line in response.iter_lines():
+            if line:
+                line = line.decode("utf-8")
+                if line.startswith("data: ") and line != "data: [DONE]":
+                    try:
+                        data = json.loads(line[6:])
+                        if data.get("type") == "response.output_text.delta":
+                            full_response += data.get("delta", "")
+                    except json.JSONDecodeError:
+                        pass
+        return full_response
 
-    def stream_chat(self, message: str, model: str = "gpt-4o") -> Generator[str, None, None]:
+    def stream_chat(self, message: str, model: str = "gpt-5-codex-mini", instructions: str = None) -> Generator[str, None, None]:
         """
         串流發送訊息到 Codex API
 
         Args:
             message: 用戶訊息
-            model: 模型名稱
+            model: 模型名稱 (gpt-5, gpt-5-codex, gpt-5-codex-mini, etc.)
+                   注意：Codex API 不支援 GPT-4 系列，只支援 GPT-5 系列
+            instructions: 系統指令（可選）
 
         Yields:
             回應文字片段
@@ -529,19 +552,25 @@ class OpenCodeCodexClient:
 
         headers = {
             "Authorization": f"Bearer {self.access_token}",
-            "Content-Type": "application/json",
-            "Accept": "text/event-stream"
+            "Content-Type": "application/json"
         }
 
         if self.account_id:
             headers["ChatGPT-Account-Id"] = self.account_id
 
+        # Codex API 使用不同的請求格式
         payload = {
             "model": model,
-            "messages": [
-                {"role": "user", "content": message}
+            "instructions": instructions or "You are a helpful assistant.",
+            "input": [
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": message}]
+                }
             ],
-            "stream": True
+            "stream": True,
+            "store": False
         }
 
         response = requests.post(
@@ -560,10 +589,8 @@ class OpenCodeCodexClient:
                 if line.startswith("data: ") and line != "data: [DONE]":
                     try:
                         data = json.loads(line[6:])
-                        delta = data.get("choices", [{}])[0].get("delta", {})
-                        content = delta.get("content", "")
-                        if content:
-                            yield content
+                        if data.get("type") == "response.output_text.delta":
+                            yield data.get("delta", "")
                     except json.JSONDecodeError:
                         pass
 
