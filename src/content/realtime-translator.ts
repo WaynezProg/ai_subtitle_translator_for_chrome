@@ -48,7 +48,7 @@ type TranslatorState = 'idle' | 'active' | 'paused';
 const SUBTITLE_STYLES = `
   .ai-subtitle-overlay {
     position: absolute;
-    bottom: 10%;
+    bottom: 4%;
     left: 50%;
     transform: translateX(-50%);
     z-index: 2147483647;

@@ -1,0 +1,40 @@
+1
+00:00:01,000 --> 00:00:04,000
+Welcome to the tutorial.
+
+2
+00:00:04,500 --> 00:00:08,000
+Today we'll learn about machine learning.
+
+3
+00:00:08,500 --> 00:00:12,000
+Machine learning is a subset of artificial intelligence.
+
+4
+00:00:12,500 --> 00:00:16,500
+It allows computers to learn from data
+without being explicitly programmed.
+
+5
+00:00:17,000 --> 00:00:20,000
+Let's start with the basics.
+
+6
+00:00:20,500 --> 00:00:24,000
+First, we need to understand what data is.
+
+7
+00:00:24,500 --> 00:00:28,000
+Data can be numbers, text, images, or any other form.
+
+8
+00:00:28,500 --> 00:00:32,000
+The more data we have, the better our model can learn.
+
+9
+00:00:32,500 --> 00:00:36,000
+Now, let's look at a simple example.
+
+10
+00:00:36,500 --> 00:00:40,000
+Thank you for watching!

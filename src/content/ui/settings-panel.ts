@@ -36,6 +36,9 @@ export interface SettingsPanelOptions {
   /** Callback when upload is completed */
   onUpload?: (file: File) => void | Promise<void>;
 
+  /** Callback when subtitle is selected from dropdown */
+  onSubtitleSelect?: (subtitleId: string) => void | Promise<void>;
+
   /** Platform for styling */
   platform: Platform;
 }
@@ -76,6 +79,22 @@ export interface SettingsPanel {
 }
 
 /**
+ * Available subtitle option for selector
+ */
+export interface SubtitleOption {
+  /** Unique identifier */
+  id: string;
+  /** Display label */
+  label: string;
+  /** Source type */
+  type: 'original' | 'translated' | 'uploaded';
+  /** Language code */
+  language?: string;
+  /** Number of cues */
+  cueCount?: number;
+}
+
+/**
  * Subtitle state for download/upload UI
  */
 export interface SubtitleState {
@@ -90,6 +109,10 @@ export interface SubtitleState {
   videoId?: string;
   sourceLanguage?: string;
   targetLanguage?: string;
+  /** Available subtitle options for selector */
+  availableSubtitles?: SubtitleOption[];
+  /** Currently selected subtitle id */
+  selectedSubtitleId?: string;
 }
 
 // ============================================================================
@@ -128,7 +151,7 @@ const POSITION_OPTIONS = [
 // ============================================================================
 
 export function createSettingsPanel(options: SettingsPanelOptions): SettingsPanel {
-  const { onSettingsChange, onCacheSelect, onTranslate, onDownload, onUpload } = options;
+  const { onSettingsChange, onCacheSelect, onTranslate, onDownload, onUpload, onSubtitleSelect } = options;
   let currentOptions = { ...options.renderOptions };
   let panel: HTMLDivElement | null = null;
   let visible = false;
@@ -139,6 +162,8 @@ export function createSettingsPanel(options: SettingsPanelOptions): SettingsPane
   let subtitleState: SubtitleState = {
     hasOriginal: false,
     hasTranslation: false,
+    availableSubtitles: [],
+    selectedSubtitleId: undefined,
   };
 
   /**
@@ -186,6 +211,10 @@ export function createSettingsPanel(options: SettingsPanelOptions): SettingsPane
 
     panelEl.appendChild(header);
 
+    // Subtitle selector section
+    const selectorSection = createSubtitleSelectorSection();
+    panelEl.appendChild(selectorSection);
+
     // Translation section
     const translationSection = createTranslationSection();
     panelEl.appendChild(translationSection);
@@ -199,6 +228,73 @@ export function createSettingsPanel(options: SettingsPanelOptions): SettingsPane
     panelEl.appendChild(displaySection);
 
     return panelEl;
+  }
+
+  /**
+   * Create subtitle selector section
+   */
+  function createSubtitleSelectorSection(): HTMLElement {
+    const section = document.createElement('div');
+    section.className = 'settings-section';
+    section.id = 'settings-subtitle-selector-section';
+
+    const sectionHeader = document.createElement('div');
+    sectionHeader.className = 'section-header';
+    sectionHeader.textContent = '字幕選擇';
+    section.appendChild(sectionHeader);
+
+    const selectorContainer = document.createElement('div');
+    selectorContainer.className = 'subtitle-selector-container';
+    selectorContainer.id = 'settings-subtitle-selector';
+    updateSubtitleSelector(selectorContainer);
+    section.appendChild(selectorContainer);
+
+    return section;
+  }
+
+  /**
+   * Update subtitle selector dropdown
+   */
+  function updateSubtitleSelector(container: HTMLElement): void {
+    clearChildren(container);
+
+    const availableSubs = subtitleState.availableSubtitles || [];
+
+    if (availableSubs.length === 0) {
+      const noSubtitle = document.createElement('div');
+      noSubtitle.className = 'no-subtitle-message';
+      noSubtitle.textContent = '尚無可用字幕';
+      container.appendChild(noSubtitle);
+      return;
+    }
+
+    // Create dropdown
+    const select = document.createElement('select');
+    select.className = 'subtitle-select';
+    select.id = 'subtitle-select-dropdown';
+
+    // Add options
+    for (const sub of availableSubs) {
+      const option = document.createElement('option');
+      option.value = sub.id;
+      option.textContent = `${sub.label}${sub.cueCount ? ` (${sub.cueCount} 句)` : ''}`;
+      if (sub.id === subtitleState.selectedSubtitleId) {
+        option.selected = true;
+      }
+      select.appendChild(option);
+    }
+
+    select.addEventListener('change', () => {
+      const selectedId = select.value;
+      subtitleState.selectedSubtitleId = selectedId;
+      if (onSubtitleSelect) {
+        Promise.resolve(onSubtitleSelect(selectedId)).catch((error) => {
+          console.error('[SettingsPanel] Subtitle select error:', error);
+        });
+      }
+    });
+
+    container.appendChild(select);
   }
 
   /**
@@ -946,6 +1042,12 @@ export function createSettingsPanel(options: SettingsPanelOptions): SettingsPane
 
     updateSubtitleState(state: SubtitleState): void {
       subtitleState = state;
+
+      // Update subtitle selector
+      const selectorContainer = panel?.querySelector('#settings-subtitle-selector');
+      if (selectorContainer) {
+        updateSubtitleSelector(selectorContainer as HTMLElement);
+      }
 
       // Update download buttons
       const downloadButtons = panel?.querySelector('#settings-download-buttons');

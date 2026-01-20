@@ -262,10 +262,11 @@ export function mapUploadedCuesToOriginal(
 
 /**
  * Find the closest uploaded cue by timing
+ * Uses a larger tolerance to handle timing differences between ASR and manual subtitles
  */
 function findClosestCueByTiming(original: Cue, uploadedCues: Cue[]): Cue | null {
-  // Tolerance: 500ms
-  const tolerance = 500;
+  // Tolerance: 2000ms (2 seconds) to handle ASR timing differences
+  const tolerance = 2000;
 
   let bestMatch: Cue | null = null;
   let bestDiff = Infinity;

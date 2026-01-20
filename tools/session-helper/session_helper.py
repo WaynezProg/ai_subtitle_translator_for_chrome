@@ -38,6 +38,14 @@ import click
 
 # Claude OAuth Configuration (from opencode-anthropic-auth)
 # Uses Anthropic's official callback URL which displays the code for manual copy
+#
+# Key scopes:
+# - org:create_api_key: Create API keys (for future use)
+# - user:profile: Access user profile info
+# - user:inference: Required for calling Claude API with OAuth token
+#
+# The OAuth token can be used with api.anthropic.com/v1/messages
+# using Authorization: Bearer {access_token}
 CLAUDE_OAUTH_CONFIG = {
     "clientId": "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
     "authorizationUrl": "https://claude.ai/oauth/authorize",
@@ -591,6 +599,7 @@ def chatgpt_oauth_flow(timeout_seconds: int) -> Optional[dict]:
         access_token = token_response.get("access_token")
         refresh_token = token_response.get("refresh_token")
         expires_in = token_response.get("expires_in")
+        id_token = token_response.get("id_token")
 
         if not access_token:
             print_error("No access token in response.")
@@ -602,6 +611,29 @@ def chatgpt_oauth_flow(timeout_seconds: int) -> Optional[dict]:
         if expires_in:
             expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
             result["expiresAt"] = expires_at.isoformat()
+
+        # Extract account_id from id_token (required for Codex API)
+        # See: auth_guide/OpenCode-Codex-API-Discovery.md
+        if id_token:
+            try:
+                # Decode JWT payload (without verification, just decode)
+                payload_b64 = id_token.split(".")[1]
+                # Add padding if needed
+                padding = 4 - len(payload_b64) % 4
+                if padding != 4:
+                    payload_b64 += "=" * padding
+                payload_bytes = base64.urlsafe_b64decode(payload_b64)
+                claims = json.loads(payload_bytes.decode("utf-8"))
+
+                # Extract chatgpt_account_id from claims
+                account_id = claims.get("chatgpt_account_id")
+                if account_id:
+                    result["accountId"] = account_id
+                    print_info(f"Extracted account ID: {account_id[:8]}...")
+                else:
+                    print_warning("No chatgpt_account_id found in id_token")
+            except Exception as e:
+                print_warning(f"Failed to parse id_token: {e}")
 
         return result
 

@@ -49,6 +49,6 @@ coverage/
 # Specs (development planning docs)
 specs/
 openspec/
-
+chatgpt_cookies.json
 *.session.json
 examples/
