@@ -89,11 +89,12 @@ class StorageBridge {
         }
       });
       
+      // Security: Use window.location.origin instead of '*' to restrict message receivers
       window.postMessage({
         type: 'AI_SUBTITLE_STORAGE_GET',
         requestId,
         keys
-      }, '*');
+      }, window.location.origin);
     });
   }
   
@@ -120,11 +121,12 @@ class StorageBridge {
         }
       });
       
+      // Security: Use window.location.origin instead of '*' to restrict message receivers
       window.postMessage({
         type: 'AI_SUBTITLE_STORAGE_SET',
         requestId,
         data: items
-      }, '*');
+      }, window.location.origin);
     });
   }
 }

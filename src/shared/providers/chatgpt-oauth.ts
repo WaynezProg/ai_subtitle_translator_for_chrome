@@ -11,6 +11,7 @@ import {
   startPKCEFlow,
   completePKCEFlow,
 } from './oauth-pkce';
+import { encrypt, decrypt, isEncryptedData, type EncryptedData } from '../utils/crypto';
 
 // ============================================================================
 // Constants
@@ -296,20 +297,89 @@ export async function launchChatGPTOAuthFlow(): Promise<ChatGPTOAuthTokens> {
 const TOKEN_STORAGE_KEY = 'chatgpt_oauth_tokens';
 
 /**
- * Store OAuth tokens securely
+ * Encrypted token storage format
+ */
+interface EncryptedChatGPTTokens {
+  accessToken: EncryptedData;
+  refreshToken?: EncryptedData;
+  idToken?: EncryptedData;
+  expiresAt?: string;
+  scopes?: string[];
+}
+
+/**
+ * Type guard for encrypted tokens
+ */
+function isEncryptedTokens(tokens: unknown): tokens is EncryptedChatGPTTokens {
+  if (!tokens || typeof tokens !== 'object') return false;
+  const t = tokens as Record<string, unknown>;
+  return isEncryptedData(t.accessToken);
+}
+
+/**
+ * Store OAuth tokens securely with encryption
+ * @security Access token, refresh token, and ID token are encrypted before storage
  */
 export async function storeChatGPTTokens(tokens: ChatGPTOAuthTokens): Promise<void> {
+  const encryptedTokens: EncryptedChatGPTTokens = {
+    accessToken: await encrypt(tokens.accessToken),
+    expiresAt: tokens.expiresAt,
+    scopes: tokens.scopes,
+  };
+  
+  if (tokens.refreshToken) {
+    encryptedTokens.refreshToken = await encrypt(tokens.refreshToken);
+  }
+  
+  if (tokens.idToken) {
+    encryptedTokens.idToken = await encrypt(tokens.idToken);
+  }
+  
   await chrome.storage.local.set({
-    [TOKEN_STORAGE_KEY]: tokens,
+    [TOKEN_STORAGE_KEY]: encryptedTokens,
   });
 }
 
 /**
- * Retrieve stored OAuth tokens
+ * Retrieve stored OAuth tokens with automatic decryption and migration
  */
 export async function getStoredChatGPTTokens(): Promise<ChatGPTOAuthTokens | null> {
   const result = await chrome.storage.local.get(TOKEN_STORAGE_KEY);
-  return result[TOKEN_STORAGE_KEY] || null;
+  const stored = result[TOKEN_STORAGE_KEY];
+  
+  if (!stored) {
+    return null;
+  }
+  
+  // Check if tokens are encrypted
+  if (isEncryptedTokens(stored)) {
+    try {
+      const tokens: ChatGPTOAuthTokens = {
+        accessToken: await decrypt(stored.accessToken),
+        expiresAt: stored.expiresAt,
+        scopes: stored.scopes,
+      };
+      
+      if (stored.refreshToken) {
+        tokens.refreshToken = await decrypt(stored.refreshToken);
+      }
+      
+      if (stored.idToken) {
+        tokens.idToken = await decrypt(stored.idToken);
+      }
+      
+      return tokens;
+    } catch (error) {
+      console.error('[ChatGPTOAuth] Failed to decrypt tokens:', error);
+      return null;
+    }
+  }
+  
+  // Legacy unencrypted tokens - migrate
+  console.warn('[ChatGPTOAuth] Migrating legacy unencrypted tokens');
+  const legacyTokens = stored as ChatGPTOAuthTokens;
+  await storeChatGPTTokens(legacyTokens);
+  return legacyTokens;
 }
 
 /**

@@ -2,12 +2,15 @@
  * Auth Storage Utilities
  * 
  * Secure storage for API keys and provider credentials.
- * Uses chrome.storage.local for persistence.
+ * Uses chrome.storage.local for persistence with AES-GCM encryption
+ * for sensitive data (API keys and OAuth tokens).
  * 
  * @see FR-009, FR-010: API Key Storage
+ * @security API keys are encrypted using AES-GCM before storage
  */
 
 import { STORAGE_KEYS } from './constants';
+import { encrypt, decrypt, isEncryptedData, type EncryptedData } from './crypto';
 import type { ProviderType } from '../types/auth';
 
 // ============================================================================
@@ -26,10 +29,14 @@ export interface StoredProviderConfig {
   /** Provider type */
   type: ProviderType;
   
-  /** API Key (for API providers) */
-  apiKey?: string;
+  /** 
+   * API Key (for API providers)
+   * Can be plain string (legacy) or EncryptedData (encrypted)
+   * @security New keys are stored encrypted; legacy keys are migrated on read
+   */
+  apiKey?: string | EncryptedData;
   
-  /** Endpoint (for Ollama) */
+  /** Endpoint (for Ollama) - not encrypted as it's not sensitive */
   endpoint?: string;
   
   /** Selected model */
@@ -139,6 +146,7 @@ export async function getProviderConfig(providerType: ProviderType): Promise<Sto
 
 /**
  * Save provider credentials
+ * API keys are encrypted before storage for security
  */
 export async function saveProviderCredentials(
   providerType: ProviderType,
@@ -156,9 +164,11 @@ export async function saveProviderCredentials(
   
   // Set appropriate field based on provider type
   if (providerType === 'ollama') {
+    // Ollama endpoint is not sensitive, store as-is
     providerConfig.endpoint = apiKeyOrEndpoint;
   } else {
-    providerConfig.apiKey = apiKeyOrEndpoint;
+    // Encrypt API key before storage
+    providerConfig.apiKey = await encrypt(apiKeyOrEndpoint);
   }
   
   config.providers[providerType] = providerConfig;
@@ -177,6 +187,7 @@ export async function deleteProviderCredentials(providerType: ProviderType): Pro
 
 /**
  * Get AuthProviderInfo for UI display and provider creation
+ * Automatically decrypts API keys and migrates legacy unencrypted keys
  */
 export async function getAuthProvider(providerType?: ProviderType): Promise<AuthProviderInfo | null> {
   const config = await getAuthConfig();
@@ -195,10 +206,16 @@ export async function getAuthProvider(providerType?: ProviderType): Promise<Auth
     return null;
   }
   
+  // Decrypt API key if encrypted, or migrate legacy unencrypted key
+  let decryptedApiKey: string | undefined;
+  if (providerConfig.apiKey) {
+    decryptedApiKey = await decryptAndMigrateApiKey(type, providerConfig.apiKey);
+  }
+  
   return {
     type,
     displayName: getProviderDisplayName(type),
-    apiKey: providerConfig.apiKey,
+    apiKey: decryptedApiKey,
     endpoint: providerConfig.endpoint,
     selectedModel: providerConfig.selectedModel,
     status: providerConfig.isValid ? 'valid' : 'invalid',
@@ -248,6 +265,38 @@ export async function markProviderValidated(
 // ============================================================================
 // Helper Functions
 // ============================================================================
+
+/**
+ * Decrypt API key and migrate legacy unencrypted keys
+ * 
+ * @param providerType - Provider type for migration
+ * @param apiKey - Encrypted or plain text API key
+ * @returns Decrypted API key
+ */
+async function decryptAndMigrateApiKey(
+  providerType: ProviderType,
+  apiKey: string | EncryptedData
+): Promise<string> {
+  if (isEncryptedData(apiKey)) {
+    // Already encrypted, just decrypt
+    return decrypt(apiKey);
+  }
+  
+  // Legacy unencrypted key - migrate to encrypted storage
+  console.warn('[AuthStorage] Migrating legacy unencrypted API key for:', providerType);
+  
+  // Encrypt and save
+  const encryptedKey = await encrypt(apiKey);
+  const config = await getAuthConfig();
+  const provider = config.providers[providerType];
+  
+  if (provider) {
+    provider.apiKey = encryptedKey;
+    await saveAuthConfig(config);
+  }
+  
+  return apiKey;
+}
 
 function getProviderDisplayName(type: ProviderType): string {
   switch (type) {

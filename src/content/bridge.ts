@@ -33,12 +33,13 @@ async function safeSendMessage(message: unknown): Promise<unknown> {
 }
 
 // Listen for messages from popup/background → forward to MAIN world
+// Security: Use window.location.origin instead of '*' to restrict message receivers
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'TOGGLE_SUBTITLES') {
     window.postMessage({
       type: 'AI_SUBTITLE_TOGGLE',
       visible: message.payload.visible
-    }, '*');
+    }, window.location.origin);
     sendResponse({ success: true });
   }
   
@@ -50,7 +51,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     window.postMessage({
       type: 'AI_SUBTITLE_BACKGROUND_MESSAGE',
       message: message
-    }, '*');
+    }, window.location.origin);
     sendResponse({ success: true });
   }
   
@@ -72,7 +73,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     window.postMessage({
       type: 'AI_SUBTITLE_GET_STATE',
       requestId
-    }, '*');
+    }, window.location.origin);
     
     // Timeout after 2 seconds
     setTimeout(() => {
@@ -88,7 +89,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     window.postMessage({
       type: 'AI_SUBTITLE_DOWNLOAD',
       mode: message.payload.mode
-    }, '*');
+    }, window.location.origin);
     sendResponse({ success: true });
   }
   
@@ -98,7 +99,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       type: 'AI_SUBTITLE_UPLOAD',
       content: message.payload.content,
       filename: message.payload.filename
-    }, '*');
+    }, window.location.origin);
     sendResponse({ success: true });
   }
   
@@ -120,7 +121,7 @@ window.addEventListener('message', (event) => {
           window.postMessage({
             type: 'AI_SUBTITLE_TOGGLE',
             visible: true
-          }, '*');
+          }, window.location.origin);
           return;
         }
         
@@ -129,7 +130,7 @@ window.addEventListener('message', (event) => {
         window.postMessage({
           type: 'AI_SUBTITLE_TOGGLE',
           visible
-        }, '*');
+        }, window.location.origin);
       } catch (error) {
         console.error('[Bridge] Failed to get visibility:', error);
       }
@@ -148,7 +149,7 @@ window.addEventListener('message', (event) => {
         requestId,
         data: {},
         error: '擴充功能已更新，請重新整理頁面'
-      }, '*');
+      }, window.location.origin);
       return;
     }
     
@@ -166,7 +167,7 @@ window.addEventListener('message', (event) => {
         type: 'AI_SUBTITLE_STORAGE_RESPONSE',
         requestId,
         data: result
-      }, '*');
+      }, window.location.origin);
     }).catch((error: unknown) => {
       console.error('[Bridge] Failed to get storage:', error);
       window.postMessage({
@@ -174,7 +175,7 @@ window.addEventListener('message', (event) => {
         requestId,
         data: {},
         error: error instanceof Error ? error.message : 'Storage access failed'
-      }, '*');
+      }, window.location.origin);
     });
     return;
   }
@@ -190,7 +191,7 @@ window.addEventListener('message', (event) => {
         requestId,
         success: false,
         error: '擴充功能已更新，請重新整理頁面'
-      }, '*');
+      }, window.location.origin);
       return;
     }
     
@@ -208,7 +209,7 @@ window.addEventListener('message', (event) => {
         type: 'AI_SUBTITLE_STORAGE_RESPONSE',
         requestId,
         success: true
-      }, '*');
+      }, window.location.origin);
     }).catch((error: unknown) => {
       console.error('[Bridge] Failed to set storage:', error);
       window.postMessage({
@@ -216,7 +217,7 @@ window.addEventListener('message', (event) => {
         requestId,
         success: false,
         error: error instanceof Error ? error.message : 'Storage write failed'
-      }, '*');
+      }, window.location.origin);
     });
     return;
   }
@@ -232,7 +233,7 @@ window.addEventListener('message', (event) => {
           type: 'AI_SUBTITLE_BRIDGE_RESPONSE',
           requestId,
           response
-        }, '*');
+        }, window.location.origin);
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Bridge communication failed';
         const isContextInvalidated = errorMessage.includes('Extension context invalidated') ||
@@ -250,7 +251,7 @@ window.addEventListener('message', (event) => {
                 : errorMessage
             }
           }
-        }, '*');
+        }, window.location.origin);
       }
     })();
     return;

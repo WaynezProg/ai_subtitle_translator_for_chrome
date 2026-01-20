@@ -1528,11 +1528,12 @@ function setupSubtitleVisibilityListener(): void {
     // Handle subtitle state request
     if (data.type === 'AI_SUBTITLE_GET_STATE') {
       const state = getSubtitleState();
+      // Security: Use window.location.origin instead of '*' to restrict message receivers
       window.postMessage({
         type: 'AI_SUBTITLE_STATE_RESPONSE',
         requestId: data.requestId,
         state,
-      }, '*');
+      }, window.location.origin);
       return;
     }
     
@@ -1562,7 +1563,8 @@ function setupSubtitleVisibilityListener(): void {
 async function loadInitialVisibility(): Promise<void> {
   try {
     // Use postMessage to request state from isolated world script
-    window.postMessage({ type: 'AI_SUBTITLE_GET_VISIBILITY' }, '*');
+    // Security: Use window.location.origin instead of '*' to restrict message receivers
+    window.postMessage({ type: 'AI_SUBTITLE_GET_VISIBILITY' }, window.location.origin);
   } catch (error) {
     console.error('[Content] Failed to load visibility state:', error);
   }

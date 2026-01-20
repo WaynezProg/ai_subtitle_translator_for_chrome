@@ -12,6 +12,7 @@ import {
   completePKCEFlow,
   buildAuthorizationUrl,
 } from './oauth-pkce';
+import { encrypt, decrypt, isEncryptedData, type EncryptedData } from '../utils/crypto';
 
 // ============================================================================
 // Constants
@@ -343,20 +344,80 @@ export async function launchClaudeOAuthFlow(): Promise<ClaudeOAuthTokens> {
 const TOKEN_STORAGE_KEY = 'claude_oauth_tokens';
 
 /**
- * Store OAuth tokens securely
+ * Encrypted token storage format
+ */
+interface EncryptedClaudeTokens {
+  accessToken: EncryptedData;
+  refreshToken?: EncryptedData;
+  expiresAt?: string;
+  scopes?: string[];
+}
+
+/**
+ * Type guard for encrypted tokens
+ */
+function isEncryptedTokens(tokens: unknown): tokens is EncryptedClaudeTokens {
+  if (!tokens || typeof tokens !== 'object') return false;
+  const t = tokens as Record<string, unknown>;
+  return isEncryptedData(t.accessToken);
+}
+
+/**
+ * Store OAuth tokens securely with encryption
+ * @security Access token and refresh token are encrypted before storage
  */
 export async function storeClaudeTokens(tokens: ClaudeOAuthTokens): Promise<void> {
+  const encryptedTokens: EncryptedClaudeTokens = {
+    accessToken: await encrypt(tokens.accessToken),
+    expiresAt: tokens.expiresAt,
+    scopes: tokens.scopes,
+  };
+  
+  if (tokens.refreshToken) {
+    encryptedTokens.refreshToken = await encrypt(tokens.refreshToken);
+  }
+  
   await chrome.storage.local.set({
-    [TOKEN_STORAGE_KEY]: tokens,
+    [TOKEN_STORAGE_KEY]: encryptedTokens,
   });
 }
 
 /**
- * Retrieve stored OAuth tokens
+ * Retrieve stored OAuth tokens with automatic decryption and migration
  */
 export async function getStoredClaudeTokens(): Promise<ClaudeOAuthTokens | null> {
   const result = await chrome.storage.local.get(TOKEN_STORAGE_KEY);
-  return result[TOKEN_STORAGE_KEY] || null;
+  const stored = result[TOKEN_STORAGE_KEY];
+  
+  if (!stored) {
+    return null;
+  }
+  
+  // Check if tokens are encrypted
+  if (isEncryptedTokens(stored)) {
+    try {
+      const tokens: ClaudeOAuthTokens = {
+        accessToken: await decrypt(stored.accessToken),
+        expiresAt: stored.expiresAt,
+        scopes: stored.scopes,
+      };
+      
+      if (stored.refreshToken) {
+        tokens.refreshToken = await decrypt(stored.refreshToken);
+      }
+      
+      return tokens;
+    } catch (error) {
+      console.error('[ClaudeOAuth] Failed to decrypt tokens:', error);
+      return null;
+    }
+  }
+  
+  // Legacy unencrypted tokens - migrate
+  console.warn('[ClaudeOAuth] Migrating legacy unencrypted tokens');
+  const legacyTokens = stored as ClaudeOAuthTokens;
+  await storeClaudeTokens(legacyTokens);
+  return legacyTokens;
 }
 
 /**

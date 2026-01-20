@@ -27,7 +27,7 @@ import type {
 import { cacheManager } from '../shared/cache';
 import { ProviderFactory } from '../shared/providers/factory';
 import { getUserSettings } from '../shared/utils/preferences';
-import { getAuthConfig } from '../shared/utils/auth-storage';
+import { getAuthConfig, getAuthProvider } from '../shared/utils/auth-storage';
 import type { AuthProvider, ProviderCredentials, ProviderStatus, ProviderType } from '../shared/types/auth';
 import { storeClaudeTokens, getValidClaudeToken, getStoredClaudeTokens } from '../shared/providers/claude-oauth';
 import { storeChatGPTTokens, getValidChatGPTToken } from '../shared/providers/chatgpt-oauth';
@@ -457,9 +457,8 @@ messageHandler.on('TRANSLATE_TEXT', async (message: TranslateTextMessage, _sende
   });
 
   try {
-    // Get auth config for credentials (only needed for non-google providers)
-    const fullAuthConfig = await getAuthConfig();
-    const providerConfig = fullAuthConfig.providers[providerType];
+    // Get provider info with decrypted credentials
+    const providerInfo = await getAuthProvider(providerType);
 
     // Build credentials based on provider type
     let credentials: ProviderCredentials;
@@ -470,16 +469,16 @@ messageHandler.on('TRANSLATE_TEXT', async (message: TranslateTextMessage, _sende
       case 'ollama':
         credentials = {
           type: 'ollama',
-          endpoint: providerConfig?.endpoint || 'http://localhost:11434',
-          model: providerConfig?.selectedModel || 'llama3.2',
+          endpoint: providerInfo?.endpoint || 'http://localhost:11434',
+          model: providerInfo?.selectedModel || 'llama3.2',
         };
         break;
       case 'claude-api':
       case 'openai-api':
         credentials = {
           type: 'api-key',
-          encryptedApiKey: providerConfig?.apiKey || '',
-          model: providerConfig?.selectedModel || (providerType === 'claude-api' ? 'claude-sonnet-4-20250514' : 'gpt-4o'),
+          encryptedApiKey: providerInfo?.apiKey || '',
+          model: providerInfo?.selectedModel || (providerType === 'claude-api' ? 'claude-sonnet-4-20250514' : 'gpt-4o'),
         };
         break;
       case 'claude-subscription': {
@@ -615,8 +614,8 @@ messageHandler.on('TRANSLATE_BATCH', async (message: TranslateBatchMessage, _sen
     }
 
     // Regular path for other providers - need credentials
-    const fullAuthConfig = await getAuthConfig();
-    const providerConfig = fullAuthConfig.providers[providerType];
+    // Get provider info with decrypted credentials
+    const providerInfo = await getAuthProvider(providerType);
 
     // Build credentials based on provider type
     let credentials: ProviderCredentials;
@@ -624,16 +623,16 @@ messageHandler.on('TRANSLATE_BATCH', async (message: TranslateBatchMessage, _sen
       case 'ollama':
         credentials = {
           type: 'ollama',
-          endpoint: providerConfig?.endpoint || 'http://localhost:11434',
-          model: providerConfig?.selectedModel || 'llama3.2',
+          endpoint: providerInfo?.endpoint || 'http://localhost:11434',
+          model: providerInfo?.selectedModel || 'llama3.2',
         };
         break;
       case 'claude-api':
       case 'openai-api':
         credentials = {
           type: 'api-key',
-          encryptedApiKey: providerConfig?.apiKey || '',
-          model: providerConfig?.selectedModel || (providerType === 'claude-api' ? 'claude-sonnet-4-20250514' : 'gpt-4o'),
+          encryptedApiKey: providerInfo?.apiKey || '',
+          model: providerInfo?.selectedModel || (providerType === 'claude-api' ? 'claude-sonnet-4-20250514' : 'gpt-4o'),
         };
         break;
       case 'claude-subscription': {

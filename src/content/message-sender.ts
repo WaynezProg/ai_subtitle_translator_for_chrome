@@ -84,11 +84,12 @@ async function sendMessage<TResponse extends Response>(
     window.addEventListener('message', handleResponse);
     
     // Send message via bridge
+    // Security: Use window.location.origin instead of '*' to restrict message receivers
     window.postMessage({
       type: 'AI_SUBTITLE_BRIDGE_REQUEST',
       requestId,
       message: messageWithId,
-    }, '*');
+    }, window.location.origin);
     
     // Timeout after 30 seconds
     setTimeout(() => {
