@@ -193,6 +193,17 @@ export class NetflixAdapter implements PlatformAdapter {
     const captured = this.capturedSubtitles.get(track.language);
     if (captured?.content && captured.content.length > 0) {
       console.log(`[NetflixAdapter] Using captured content for ${track.language}, length: ${captured.content.length}`);
+      
+      // Validate content before returning
+      if (!this.isSubtitleContent(captured.content)) {
+        console.warn('[NetflixAdapter] Captured content is not valid subtitle format');
+        throw new AdapterError(
+          'SUBTITLE_FETCH_FAILED',
+          'Captured content is not a valid subtitle format. Please try disabling and re-enabling subtitles in Netflix.',
+          this.platform
+        );
+      }
+      
       return {
         content: captured.content,
         format: this.detectFormatFromContent(captured.content),
@@ -207,6 +218,13 @@ export class NetflixAdapter implements PlatformAdapter {
     for (const [lang, subtitle] of this.capturedSubtitles) {
       if (subtitle.content && subtitle.content.length > 0) {
         console.log(`[NetflixAdapter] Using available captured content from ${lang} (requested: ${track.language})`);
+        
+        // Validate content before returning
+        if (!this.isSubtitleContent(subtitle.content)) {
+          console.warn('[NetflixAdapter] Captured content is not valid subtitle format');
+          continue; // Try next captured subtitle
+        }
+        
         return {
           content: subtitle.content,
           format: this.detectFormatFromContent(subtitle.content),
@@ -629,8 +647,16 @@ export class NetflixAdapter implements PlatformAdapter {
   private isSubtitleContent(content: string): boolean {
     if (!content || content.length < 50) return false;
     
+    // Remove BOM and trim for accurate detection
+    const cleaned = content.replace(/^\uFEFF/, '').trim();
+    
+    // Must start with < for XML-based formats or WEBVTT
+    if (!cleaned.startsWith('<') && !cleaned.startsWith('WEBVTT')) {
+      return false;
+    }
+    
     // Check first 500 chars for subtitle signatures
-    const sample = content.substring(0, 500);
+    const sample = cleaned.substring(0, 500);
     
     return (
       sample.includes('<?xml') ||
@@ -767,12 +793,28 @@ export class NetflixAdapter implements PlatformAdapter {
    * Detect subtitle format from content
    */
   private detectFormatFromContent(content: string): SubtitleFormat {
-    if (content.includes('<?xml') || content.includes('<tt ') || content.includes('<tt>')) {
-      return 'ttml';
-    }
-    if (content.includes('WEBVTT')) {
+    // Remove BOM and trim for accurate detection
+    const cleaned = content.replace(/^\uFEFF/, '').trim();
+    
+    // Check for WEBVTT first (simpler check)
+    if (cleaned.startsWith('WEBVTT') || cleaned.includes('WEBVTT')) {
       return 'webvtt';
     }
+    
+    // Check for TTML/XML
+    if (cleaned.startsWith('<?xml') || cleaned.startsWith('<tt') || 
+        cleaned.includes('<tt ') || cleaned.includes('<tt>') ||
+        cleaned.includes('http://www.w3.org/ns/ttml')) {
+      return 'ttml';
+    }
+    
+    // If content doesn't look like a valid subtitle format, still return ttml
+    // but log a warning - the parser will provide a better error message
+    if (!cleaned.startsWith('<')) {
+      console.warn('[NetflixAdapter] Content does not appear to be valid subtitle format:', 
+        cleaned.substring(0, 100));
+    }
+    
     return 'ttml';  // Netflix default
   }
   

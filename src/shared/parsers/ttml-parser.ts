@@ -129,12 +129,38 @@ function extractTextContent(element: Element): string {
 }
 
 /**
+ * Preprocess TTML content before parsing
+ * - Removes BOM (Byte Order Mark)
+ * - Trims leading/trailing whitespace
+ * - Validates basic structure
+ */
+function preprocessTTML(content: string): string {
+  // Remove BOM (UTF-8: EF BB BF, UTF-16 LE: FF FE, UTF-16 BE: FE FF)
+  let processed = content.replace(/^\uFEFF/, '');
+  
+  // Trim leading/trailing whitespace
+  processed = processed.trim();
+  
+  // Quick validation: must start with < (XML declaration or root element)
+  if (!processed.startsWith('<')) {
+    throw new TTMLParseError(
+      `Invalid TTML content: expected XML but got "${processed.substring(0, 50)}..."`
+    );
+  }
+  
+  return processed;
+}
+
+/**
  * Parse TTML content into cues
  */
 export function parseTTML(content: string): TTMLParseResult {
+  // Preprocess content
+  const processedContent = preprocessTTML(content);
+  
   // Parse XML
   const parser = new DOMParser();
-  const doc = parser.parseFromString(content, 'application/xml');
+  const doc = parser.parseFromString(processedContent, 'application/xml');
   
   // Check for parsing errors
   const parseError = doc.querySelector('parsererror');

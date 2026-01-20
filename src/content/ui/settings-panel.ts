@@ -976,6 +976,16 @@ export function createSettingsPanel(options: SettingsPanelOptions): SettingsPane
       if (panel) {
         visible = true;
         panel.classList.add('visible');
+        
+        // Refresh UI to reflect current state when showing
+        const selectorContainer = panel.querySelector('#settings-subtitle-selector');
+        if (selectorContainer) {
+          updateSubtitleSelector(selectorContainer as HTMLElement);
+        }
+        const downloadButtons = panel.querySelector('#settings-download-buttons');
+        if (downloadButtons) {
+          updateDownloadButtons(downloadButtons as HTMLElement);
+        }
       }
     },
 
@@ -1041,10 +1051,17 @@ export function createSettingsPanel(options: SettingsPanelOptions): SettingsPane
     },
 
     updateSubtitleState(state: SubtitleState): void {
+      console.log('[SettingsPanel] updateSubtitleState called:', {
+        hasPanel: !!panel,
+        availableSubtitles: state.availableSubtitles,
+        selectedSubtitleId: state.selectedSubtitleId,
+      });
+      
       subtitleState = state;
 
       // Update subtitle selector
       const selectorContainer = panel?.querySelector('#settings-subtitle-selector');
+      console.log('[SettingsPanel] selectorContainer found:', !!selectorContainer);
       if (selectorContainer) {
         updateSubtitleSelector(selectorContainer as HTMLElement);
       }

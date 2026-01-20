@@ -1781,6 +1781,7 @@ async function handleSubtitleUpload(content: string, filename: string): Promise<
     }
     
     console.log(`[Content] Parsed ${parseResult.cues.length} cues from uploaded file`);
+    console.log('[Content] First 3 parsed cues:', parseResult.cues.slice(0, 3));
     
     // Direct replace mode: Use uploaded subtitles directly with their own timing
     // This replaces any existing subtitles completely
@@ -1792,6 +1793,12 @@ async function handleSubtitleUpload(content: string, filename: string): Promise<
       originalText: '',  // Empty to mark as uploaded/replaced
       translatedText: cue.text,
     }));
+    
+    console.log('[Content] preTranslatedCuesWithTiming set:', {
+      length: preTranslatedCuesWithTiming.length,
+      firstCue: preTranslatedCuesWithTiming[0],
+      hasTranslatedText: preTranslatedCuesWithTiming[0]?.translatedText ? 'yes' : 'no',
+    });
     
     // Clear and rebuild the lookup map
     preTranslatedCuesMap.clear();
