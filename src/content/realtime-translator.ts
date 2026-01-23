@@ -184,8 +184,9 @@ export class RealtimeTranslator {
     if (this.state !== 'active' || !this.videoElement) {
       return;
     }
-    // Reset lastDisplayedText to force re-render
+    // Reset display tracking to force re-render
     this.lastDisplayedText = '';
+    this.lastDisplayedCueStart = -1;
     // Trigger immediate update
     this.onTimeUpdateImmediate();
   }
@@ -486,6 +487,7 @@ export class RealtimeTranslator {
           // Immediately refresh display to show the new translation
           if (this.state === 'active') {
             this.lastDisplayedText = ''; // Force refresh
+            this.lastDisplayedCueStart = -1; // Also reset cue tracking
             this.onTimeUpdateImmediate();
           }
         }
