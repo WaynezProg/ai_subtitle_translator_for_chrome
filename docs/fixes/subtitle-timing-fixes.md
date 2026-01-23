@@ -1,0 +1,206 @@
+# 字幕翻譯時間延遲修復紀錄
+
+## 問題描述
+
+用戶反映在使用 AI 翻譯字幕時，翻譯後的字幕會出現時間位移（timing shifts），導致字幕顯示與影片音訊不同步。此問題在以下情況特別明顯：
+
+- 固定字幕翻譯
+- 自動生成字幕（ASR）翻譯
+- AI 上下文翻譯後的字幕
+
+## 根本原因分析
+
+經過深入調查，發現多個潛在問題：
+
+### 1. 文字匹配導致錯誤的 cue 更新
+當多個字幕 cue 具有相同文字時（常見於 ASR 或重複對話），使用文字匹配會找到第一個匹配的 cue，而非正確時間點的 cue。
+
+### 2. 字幕未按時間排序
+某些字幕檔案中的 cue 可能不是按時間順序排列，導致線性搜尋 `findActiveCue` 返回錯誤的 cue。
+
+### 3. 顯示狀態追蹤不完整
+僅追蹤 `lastDisplayedText` 無法處理連續相同翻譯文字的情況，導致第二個相同文字的 cue 不會觸發更新。
+
+### 4. 狀態重置不一致
+在刷新顯示或清除 overlay 時，未同時重置所有追蹤變數。
+
+## 修復方案
+
+### 修復 1: 使用索引匹配作為主要方法
+**Commit:** `0058375`
+
+**修改檔案:** `src/content/index.ts`
+
+```typescript
+// IMPORTANT: Use index-based matching as PRIMARY method
+// The parser reindexes cues so cue.index === array position
+const cueIndex = translatedCue.index;
+if (cueIndex >= 0 && cueIndex < preTranslatedCuesWithTiming.length) {
+  const timingCue = preTranslatedCuesWithTiming[cueIndex];
+  // Verify the text matches to avoid mismatched indices
+  if (timingCue.originalText.trim() === original) {
+    timingCue.translatedText = translated;
+    continue;
+  }
+}
+
+// Fallback to text-based matching only if index matching failed
+for (const timingCue of preTranslatedCuesWithTiming) {
+  if (timingCue.originalText.trim() === original) {
+    timingCue.translatedText = translated;
+    break;
+  }
+}
+```
+
+**說明:**
+- 改用索引匹配作為主要方法，因為解析器會重新索引使 `cue.index === array position`
+- 文字匹配僅作為後備方案
+
+---
+
+### 修復 2: 按時間排序並重新索引
+**Commit:** `798fefc`
+
+**修改檔案:** `src/content/index.ts`
+
+```typescript
+// IMPORTANT: Sort cues by startTime to ensure correct time-based lookup
+// Some subtitle formats may have cues out of order in the file
+// After sorting, reindex to maintain the invariant: cue.index === array position
+cues = cues.slice().sort((a, b) => a.startTime - b.startTime);
+cues = cues.map((cue, idx) => ({ ...cue, index: idx }));
+```
+
+**說明:**
+- 解析後按 `startTime` 排序確保時間順序
+- 排序後重新索引以維持 `cue.index === array position` 不變式
+- 快取的翻譯也同樣排序處理
+
+---
+
+### 修復 3: 追蹤顯示的 cue 起始時間
+**Commit:** `1fb5110`
+
+**修改檔案:** `src/content/realtime-translator.ts`
+
+```typescript
+private lastDisplayedCueStart: number = -1;  // Track which cue is displayed
+
+// Update display if:
+// 1. The text has changed, OR
+// 2. We're on a different cue (different start time) even if text is the same
+const cueChanged = activeCue.startTime !== this.lastDisplayedCueStart;
+const textChanged = displayText !== this.lastDisplayedText;
+
+if (textChanged || cueChanged) {
+  this.lastDisplayedText = displayText;
+  this.lastDisplayedCueStart = activeCue.startTime;
+  this.updateOverlay(activeCue.originalText, activeCue.translatedText);
+}
+```
+
+**說明:**
+- 新增 `lastDisplayedCueStart` 追蹤當前顯示的 cue
+- 即使翻譯文字相同，切換到不同 cue 時也會觸發更新
+
+---
+
+### 修復 4: 統一重置顯示追蹤變數
+**Commits:** `1d4d19a`, `e1b0b57`
+
+**修改檔案:** `src/content/realtime-translator.ts`
+
+```typescript
+// refreshCurrentCue()
+refreshCurrentCue(): void {
+  if (this.state !== 'active' || !this.videoElement) {
+    return;
+  }
+  // Reset display tracking to force re-render
+  this.lastDisplayedText = '';
+  this.lastDisplayedCueStart = -1;
+  this.onTimeUpdateImmediate();
+}
+
+// On-demand translation callback
+if (this.state === 'active') {
+  this.lastDisplayedText = ''; // Force refresh
+  this.lastDisplayedCueStart = -1; // Also reset cue tracking
+  this.onTimeUpdateImmediate();
+}
+
+// Clear overlay
+if (this.lastDisplayedText !== '' || this.lastDisplayedCueStart !== -1) {
+  this.lastDisplayedText = '';
+  this.lastDisplayedCueStart = -1;
+  this.clearOverlay();
+}
+```
+
+**說明:**
+- 所有重置顯示狀態的地方都同時重置 `lastDisplayedText` 和 `lastDisplayedCueStart`
+- 確保狀態一致性
+
+---
+
+### 先前相關修復
+
+| Commit | 說明 |
+|--------|------|
+| `d67ca61` | 簡化快取匹配邏輯以防止時間問題 |
+| `323111f` | 使用線性搜尋取代二分搜尋以提高可靠性 |
+| `36861ad` | 改進字幕翻譯時間以防止延遲和時間位移 |
+
+---
+
+## 技術細節
+
+### 時間保存流程
+
+```
+解析器 (JSON3/WebVTT/TTML)
+    ↓
+排序 (按 startTime)
+    ↓
+重新索引 (cue.index = array position)
+    ↓
+preTranslatedCuesWithTiming (保留 startTime/endTime)
+    ↓
+翻譯匹配 (使用 index)
+    ↓
+findActiveCue (使用 currentTime 比對 startTime/endTime)
+    ↓
+顯示 (追蹤 startTime 和 text)
+```
+
+### 關鍵不變式
+
+1. **索引對應位置:** `cue.index === array position`
+2. **時間保留:** 原始 `startTime` 和 `endTime` 永不修改
+3. **時間排序:** cues 陣列始終按 `startTime` 排序
+
+### 受影響的檔案
+
+- `src/content/index.ts` - 翻譯協調和匹配邏輯
+- `src/content/realtime-translator.ts` - 即時顯示和狀態追蹤
+- `src/shared/parsers/json3-parser.ts` - YouTube JSON3 解析（已移除合併邏輯）
+
+---
+
+## 測試驗證
+
+所有 334 個測試通過：
+
+```bash
+npm test
+# Test Files  14 passed (14)
+# Tests  334 passed (334)
+```
+
+---
+
+## 版本資訊
+
+- 修復日期: 2026-01-23
+- 相關 commits: `0058375`, `798fefc`, `1fb5110`, `1d4d19a`, `e1b0b57`
