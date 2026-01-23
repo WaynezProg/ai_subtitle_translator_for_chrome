@@ -1134,20 +1134,31 @@ async function translateInBackground(
 
             if (original && translated) {
               preTranslatedCuesMap.set(original, translated);
-              // Use text matching to ensure correct timing association
-              let updated = false;
-              for (const timingCue of preTranslatedCuesWithTiming) {
+
+              // IMPORTANT: Use index-based matching as PRIMARY method
+              // The parser reindexes cues so cue.index === array position
+              // Text-based matching can fail when multiple cues have identical text,
+              // causing translations to be applied to wrong cues and timing shifts
+              const cueIndex = translatedCue.index;
+              if (cueIndex >= 0 && cueIndex < preTranslatedCuesWithTiming.length) {
+                const timingCue = preTranslatedCuesWithTiming[cueIndex];
+                // Verify the text matches to avoid mismatched indices
                 if (timingCue.originalText.trim() === original) {
                   timingCue.translatedText = translated;
-                  updated = true;
+                  quickTranslatedCount++;
+                  continue;
+                }
+              }
+
+              // Fallback to text-based matching only if index matching failed
+              for (const timingCue of preTranslatedCuesWithTiming) {
+                if (timingCue.originalText.trim() === original && timingCue.translatedText === timingCue.originalText) {
+                  // Only update if this cue hasn't been translated yet (avoid duplicates)
+                  timingCue.translatedText = translated;
+                  quickTranslatedCount++;
                   break;
                 }
               }
-              // Fallback to index-based update if text match fails
-              if (!updated && translatedCue.index < preTranslatedCuesWithTiming.length) {
-                preTranslatedCuesWithTiming[translatedCue.index].translatedText = translated;
-              }
-              quickTranslatedCount++;
             }
           }
 
@@ -1224,22 +1235,28 @@ async function translateInBackground(
                 // Store in map for lookup (overwrites Google Translate results if AI)
                 preTranslatedCuesMap.set(original, translated);
 
-                // Update the timing cue with translation
-                // Use text matching as primary method to ensure correct timing association
-                // This prevents timing shifts when indices don't match array positions
-                let updated = false;
+                // IMPORTANT: Use index-based matching as PRIMARY method
+                // The parser reindexes cues so cue.index === array position
+                // Text-based matching can fail when multiple cues have identical text,
+                // causing translations to be applied to wrong cues and timing shifts
+                if (cueIndex >= 0 && cueIndex < preTranslatedCuesWithTiming.length) {
+                  const timingCue = preTranslatedCuesWithTiming[cueIndex];
+                  // Verify the text matches to avoid mismatched indices
+                  if (timingCue.originalText.trim() === original) {
+                    timingCue.translatedText = translated;
+                    batchSuccessCount++;
+                    continue;
+                  }
+                }
+
+                // Fallback to text-based matching only if index matching failed
                 for (const timingCue of preTranslatedCuesWithTiming) {
                   if (timingCue.originalText.trim() === original) {
                     timingCue.translatedText = translated;
-                    updated = true;
+                    batchSuccessCount++;
                     break;
                   }
                 }
-                // Fallback to index-based update if text match fails
-                if (!updated && cueIndex < preTranslatedCuesWithTiming.length) {
-                  preTranslatedCuesWithTiming[cueIndex].translatedText = translated;
-                }
-                batchSuccessCount++;
               }
             }
 
