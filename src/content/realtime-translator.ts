@@ -492,25 +492,18 @@ export class RealtimeTranslator {
   }
   
   /**
-   * Binary search to find active cue - O(log n) instead of O(n)
+   * Find active cue using linear search for reliability
+   * Linear search is more reliable when cues may have overlapping times or gaps
+   * For typical subtitle files (~500 cues), performance is acceptable
    */
   private findActiveCue(cues: TranslatedCue[], currentTime: number): TranslatedCue | null {
-    let left = 0;
-    let right = cues.length - 1;
-    
-    while (left <= right) {
-      const mid = Math.floor((left + right) / 2);
-      const cue = cues[mid];
-      
+    // Use linear search to find the cue whose time range contains currentTime
+    // This is more reliable than binary search when timing may have gaps or overlaps
+    for (const cue of cues) {
       if (currentTime >= cue.startTime && currentTime < cue.endTime) {
         return cue;
-      } else if (currentTime < cue.startTime) {
-        right = mid - 1;
-      } else {
-        left = mid + 1;
       }
     }
-    
     return null;
   }
   
