@@ -145,7 +145,7 @@ window.addEventListener('message', (event) => {
           visible
         }, window.location.origin);
       } catch (error) {
-        bridgeLog.error(' Failed to get visibility:', error);
+        bridgeLog.error('Failed to get visibility:', error);
       }
     })();
     return;
@@ -182,7 +182,7 @@ window.addEventListener('message', (event) => {
         data: result
       }, window.location.origin);
     }).catch((error: unknown) => {
-      bridgeLog.error(' Failed to get storage:', error);
+      bridgeLog.error('Failed to get storage:', error);
       window.postMessage({
         type: 'AI_SUBTITLE_STORAGE_RESPONSE',
         requestId,
@@ -224,7 +224,7 @@ window.addEventListener('message', (event) => {
         success: true
       }, window.location.origin);
     }).catch((error: unknown) => {
-      bridgeLog.error(' Failed to set storage:', error);
+      bridgeLog.error('Failed to set storage:', error);
       window.postMessage({
         type: 'AI_SUBTITLE_STORAGE_RESPONSE',
         requestId,
@@ -271,4 +271,4 @@ window.addEventListener('message', (event) => {
   }
 });
 
-bridgeLog.debug(' Content script bridge loaded');
+bridgeLog.debug('Content script bridge loaded');

@@ -699,11 +699,15 @@ async function handleTranslateClick(): Promise<void> {
   }
   
   log.debug('[Content] Using batch mode (realtimeMode is false)');
-  
+
+  // Acquire lock to prevent race conditions
+  translationStartLock = true;
+
   // Batch mode: Get subtitle tracks
   const tracks = await currentAdapter.getSubtitleTracks();
   if (tracks.length === 0) {
     showInfoToast('此影片沒有可用的字幕');
+    translationStartLock = false;  // Release lock
     return;
   }
   
@@ -766,6 +770,8 @@ async function handleTranslateClick(): Promise<void> {
     floatingButton?.setState('error');
     progressOverlay?.hide();
     showErrorToast('API_ERROR', error instanceof Error ? error.message : '翻譯失敗');
+  } finally {
+    translationStartLock = false;  // Release lock
   }
 }
 
