@@ -456,8 +456,9 @@ export class RealtimeTranslator {
       }
     } else {
       // No active cue, clear display
-      if (this.lastDisplayedText !== '') {
+      if (this.lastDisplayedText !== '' || this.lastDisplayedCueStart !== -1) {
         this.lastDisplayedText = '';
+        this.lastDisplayedCueStart = -1;
         this.clearOverlay();
       }
     }
