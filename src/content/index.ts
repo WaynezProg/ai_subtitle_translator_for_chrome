@@ -1366,34 +1366,17 @@ async function translateInBackground(
 }
 
 /**
- * Find best matching translation from cache
+ * Find matching translation from cache
+ * Uses exact text matching only to prevent timing issues from partial matches
  */
 function findBestMatch(text: string, cache: Map<string, string>): string | null {
   const normalizedText = text.trim();
-  
-  // Exact match
+
+  // Exact match only - partial matches can cause timing issues
   if (cache.has(normalizedText)) {
     return cache.get(normalizedText)!;
   }
-  
-  // Try to find partial matches (for ASR subtitles that build up incrementally)
-  for (const [original, translated] of cache) {
-    // If the cache entry contains this text
-    if (original.includes(normalizedText) && normalizedText.length > 5) {
-      // Extract the corresponding part of the translation
-      const startIdx = original.indexOf(normalizedText);
-      const ratio = startIdx / original.length;
-      const translatedStart = Math.floor(ratio * translated.length);
-      const translatedLength = Math.floor((normalizedText.length / original.length) * translated.length);
-      return translated.substring(translatedStart, translatedStart + translatedLength) || translated;
-    }
-    
-    // If this text contains the cache entry
-    if (normalizedText.includes(original) && original.length > 5) {
-      return translated;
-    }
-  }
-  
+
   return null;
 }
 
