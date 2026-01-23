@@ -116,6 +116,7 @@ export class RealtimeTranslator {
   private seekHandler: (() => void) | null = null;
   private currentCueIndex: number = -1;
   private lastDisplayedText: string = '';
+  private lastDisplayedCueStart: number = -1;  // Track which cue is displayed by its start time
   private lastUpdateTime: number = 0;
   private pendingTranslations: Map<string, Promise<string>> = new Map();
   private translateDebounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -333,6 +334,7 @@ export class RealtimeTranslator {
     this.pendingTranslations.clear();
     this.currentCueIndex = -1;
     this.lastDisplayedText = '';
+    this.lastDisplayedCueStart = -1;
     this.cache = {};
   }
   
@@ -439,8 +441,16 @@ export class RealtimeTranslator {
       }
 
       const displayText = activeCue.translatedText;
-      if (displayText !== this.lastDisplayedText) {
+      // Update display if:
+      // 1. The text has changed, OR
+      // 2. We're on a different cue (different start time) even if text is the same
+      // This ensures consecutive cues with identical text still trigger updates
+      const cueChanged = activeCue.startTime !== this.lastDisplayedCueStart;
+      const textChanged = displayText !== this.lastDisplayedText;
+
+      if (textChanged || cueChanged) {
         this.lastDisplayedText = displayText;
+        this.lastDisplayedCueStart = activeCue.startTime;
         this.updateOverlay(activeCue.originalText, activeCue.translatedText);
       }
     } else {
