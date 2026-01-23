@@ -23,6 +23,7 @@ import type {
 } from './types';
 import { ProviderError } from './types';
 import { TRANSLATION_CONFIG } from '../utils/constants';
+import { fetchWithRetry, RetryStrategies, type RetryStrategy } from '../utils/error-handler';
 
 // ============================================================================
 // Constants
@@ -258,8 +259,17 @@ export class GoogleTranslateProvider implements TranslationProvider {
   // Private Methods
   // ============================================================================
   
+  // Custom retry strategy for Google Translate (shorter delays due to rate limiting)
+  private readonly retryStrategy: RetryStrategy = {
+    ...RetryStrategies.network,
+    maxAttempts: 3,
+    baseDelayMs: 500,
+    maxDelayMs: 5000,
+    retryableStatuses: [408, 429, 500, 502, 503, 504],
+  };
+
   /**
-   * Translate text using Google Translate API
+   * Translate text using Google Translate API with retry logic
    */
   private async translateText(
     text: string,
@@ -273,32 +283,43 @@ export class GoogleTranslateProvider implements TranslationProvider {
       dt: 't',
       q: text,
     });
-    
+
     const url = `${GOOGLE_TRANSLATE_URL}?${params.toString()}`;
-    
+
     try {
-      const response = await fetch(url, {
-        method: 'GET',
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      // Use fetchWithRetry for automatic retry on network failures
+      const response = await fetchWithRetry(
+        url,
+        {
+          method: 'GET',
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          },
+          timeout: 10000, // 10 second timeout per request
         },
-      });
-      
+        {
+          strategy: this.retryStrategy,
+          onRetry: (attempt, error, delay) => {
+            console.debug(`[GoogleTranslate] Retry ${attempt}: ${error.message}, waiting ${delay}ms`);
+          },
+        }
+      );
+
       if (!response.ok) {
         if (response.status === 429) {
           throw this.createError('RATE_LIMITED', 'Google 翻譯請求過於頻繁');
         }
         throw this.createError('SERVICE_UNAVAILABLE', `HTTP ${response.status}`);
       }
-      
+
       // Google Translate returns a nested array structure
       // [[["translated text","original text",null,null,10]],null,"en",...]
       const data = await response.json() as unknown[][];
-      
+
       if (!Array.isArray(data) || !Array.isArray(data[0])) {
         throw this.createError('INVALID_RESPONSE', '無效的回應格式');
       }
-      
+
       // Extract translated text from nested array
       let translatedText = '';
       for (const item of data[0]) {
@@ -306,9 +327,9 @@ export class GoogleTranslateProvider implements TranslationProvider {
           translatedText += item[0];
         }
       }
-      
+
       this.requestCount++;
-      
+
       return translatedText;
     } catch (error) {
       if (error instanceof ProviderError) {

@@ -87,6 +87,7 @@ export interface CancelTranslationResponse extends Response<{
  * GET_CACHED_TRANSLATION: Query cached translation
  */
 export interface GetCachedTranslationMessage extends Message<'GET_CACHED_TRANSLATION', {
+  platform: string;
   videoId: string;
   sourceLanguage: string;
   targetLanguage: string;

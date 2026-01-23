@@ -19,6 +19,9 @@ import type {
   VideoEventCallback,
 } from './types';
 import { AdapterError, DEFAULT_RENDER_OPTIONS } from './types';
+import { createLogger } from '../../shared/utils/logger';
+
+const log = createLogger('PrimeAdapter');
 
 // ============================================================================
 // Types
@@ -75,6 +78,7 @@ export class PrimeAdapter implements PlatformAdapter {
   private originalXHROpen: typeof XMLHttpRequest.prototype.open | null = null;
   private capturedAuthHeaders: Record<string, string> = {};
   private initialized = false;
+  private videoObserver: MutationObserver | null = null;
   
   // ============================================================================
   // Public Methods
@@ -87,7 +91,7 @@ export class PrimeAdapter implements PlatformAdapter {
   async initialize(): Promise<void> {
     if (this.initialized) return;
     
-    console.log('[PrimeAdapter] Initializing...');
+    log.info('Initializing...');
     
     // Setup fetch/XHR hooks to intercept requests
     this.setupFetchHook();
@@ -97,7 +101,7 @@ export class PrimeAdapter implements PlatformAdapter {
     await this.waitForVideoElement();
     
     this.initialized = true;
-    console.log('[PrimeAdapter] Initialized');
+    log.info('Initialized');
   }
   
   getVideoId(): string | null {
@@ -114,7 +118,7 @@ export class PrimeAdapter implements PlatformAdapter {
   }
   
   async fetchSubtitle(track: SubtitleTrack): Promise<RawSubtitle> {
-    console.log('[PrimeAdapter] Fetching subtitle:', track.id);
+    log.debug('Fetching subtitle', { trackId: track.id });
     
     try {
       // Include captured authorization headers
@@ -160,7 +164,7 @@ export class PrimeAdapter implements PlatformAdapter {
     this.currentCues = cues;
     this.createOrUpdateOverlay(options);
     this.setupTimeSync();
-    console.log('[PrimeAdapter] Injected', cues.length, 'cues');
+    log.debug('Injected cues', { count: cues.length });
   }
   
   removeSubtitles(): void {
@@ -212,29 +216,35 @@ export class PrimeAdapter implements PlatformAdapter {
   }
   
   destroy(): void {
-    console.log('[PrimeAdapter] Destroying...');
-    
+    log.info('Destroying...');
+
+    // Cleanup video observer
+    if (this.videoObserver) {
+      this.videoObserver.disconnect();
+      this.videoObserver = null;
+    }
+
     // Restore original fetch
     if (this.originalFetch) {
       window.fetch = this.originalFetch;
       this.originalFetch = null;
     }
-    
+
     // Restore original XHR
     if (this.originalXHROpen) {
       XMLHttpRequest.prototype.open = this.originalXHROpen;
       this.originalXHROpen = null;
     }
-    
+
     // Cleanup event listeners
     for (const cleanup of this.eventListeners.values()) {
       cleanup();
     }
     this.eventListeners.clear();
-    
+
     // Remove overlay
     this.removeSubtitles();
-    
+
     this.capturedAuthHeaders = {};
     this.initialized = false;
   }
@@ -249,29 +259,42 @@ export class PrimeAdapter implements PlatformAdapter {
   private setupFetchHook(): void {
     this.originalFetch = window.fetch;
     const self = this;
-    
+
     window.fetch = async function(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+      // Safety check: if originalFetch is gone, try to use the current window.fetch
+      // This can happen if another script restores fetch before we do
+      const fetchFn = self.originalFetch || window.fetch;
+
       let url: string;
-      if (typeof input === 'string') {
-        url = input;
-      } else if (input instanceof URL) {
-        url = input.toString();
-      } else if (input instanceof Request) {
-        url = input.url;
-      } else {
-        // Fallback for unexpected types
-        url = String(input);
+      try {
+        if (typeof input === 'string') {
+          url = input;
+        } else if (input instanceof URL) {
+          url = input.toString();
+        } else if (input instanceof Request) {
+          url = input.url;
+        } else {
+          // Fallback for unexpected types
+          url = String(input);
+        }
+      } catch {
+        // If URL extraction fails, just pass through to original fetch
+        return fetchFn.call(window, input, init);
       }
-      
-      // Capture authorization headers from API requests
-      if (self.isApiRequest(url) && init?.headers) {
-        self.captureHeaders(init.headers);
+
+      // Wrap header capture in try-catch to prevent breaking the page
+      try {
+        if (self.isApiRequest(url) && init?.headers) {
+          self.captureHeaders(init.headers);
+        }
+      } catch (error) {
+        log.warn('Failed to capture headers', { error: String(error) });
       }
-      
+
       // Clone the response for inspection
-      const response = await self.originalFetch!.call(window, input, init);
-      
-      // Check for playback/manifest endpoints
+      const response = await fetchFn.call(window, input, init);
+
+      // Check for playback/manifest endpoints (wrap in try-catch)
       if (self.isPlaybackUrl(url)) {
         try {
           const clonedResponse = response.clone();
@@ -281,16 +304,20 @@ export class PrimeAdapter implements PlatformAdapter {
           // Ignore parse errors
         }
       }
-      
-      // Capture direct subtitle URLs
-      if (self.isSubtitleUrl(url)) {
-        self.captureSubtitleUrl(url);
+
+      // Capture direct subtitle URLs (wrap in try-catch)
+      try {
+        if (self.isSubtitleUrl(url)) {
+          self.captureSubtitleUrl(url);
+        }
+      } catch (error) {
+        log.warn('Failed to capture subtitle URL', { error: String(error) });
       }
-      
+
       return response;
     };
-    
-    console.log('[PrimeAdapter] Fetch hook installed');
+
+    log.debug('Fetch hook installed');
   }
   
   /**
@@ -299,7 +326,7 @@ export class PrimeAdapter implements PlatformAdapter {
   private setupXHRHook(): void {
     this.originalXHROpen = XMLHttpRequest.prototype.open;
     const self = this;
-    
+
     XMLHttpRequest.prototype.open = function(
       method: string,
       url: string | URL,
@@ -307,14 +334,38 @@ export class PrimeAdapter implements PlatformAdapter {
       username?: string | null,
       password?: string | null
     ) {
-      const urlString = url.toString();
-      
-      // Capture subtitle URLs
-      if (self.isSubtitleUrl(urlString)) {
-        self.captureSubtitleUrl(urlString);
+      // Safety check: if originalXHROpen is gone, we can't proceed safely
+      const xhrOpen = self.originalXHROpen;
+      if (!xhrOpen) {
+        log.warn('XHR hook: originalXHROpen is null');
+        return;
       }
-      
-      return self.originalXHROpen!.call(
+
+      let urlString: string;
+      try {
+        urlString = url.toString();
+      } catch {
+        // If URL conversion fails, just call original
+        return xhrOpen.call(
+          this,
+          method,
+          url,
+          async ?? true,
+          username ?? null,
+          password ?? null
+        );
+      }
+
+      // Capture subtitle URLs (wrap in try-catch)
+      try {
+        if (self.isSubtitleUrl(urlString)) {
+          self.captureSubtitleUrl(urlString);
+        }
+      } catch (error) {
+        log.warn('Failed to capture XHR subtitle URL', { error: String(error) });
+      }
+
+      return xhrOpen.call(
         this,
         method,
         url,
@@ -323,8 +374,8 @@ export class PrimeAdapter implements PlatformAdapter {
         password ?? null
       );
     };
-    
-    console.log('[PrimeAdapter] XHR hook installed');
+
+    log.debug('XHR hook installed');
   }
   
   /**
@@ -433,7 +484,7 @@ export class PrimeAdapter implements PlatformAdapter {
       });
     }
     
-    console.log('[PrimeAdapter] Extracted', this.subtitleTracks.length, 'subtitle tracks');
+    log.debug('Extracted subtitle tracks', { count: this.subtitleTracks.length });
   }
   
   /**
@@ -471,9 +522,9 @@ export class PrimeAdapter implements PlatformAdapter {
         isDefault: this.subtitleTracks.length === 0,
       });
       
-      console.log('[PrimeAdapter] Captured subtitle URL:', language);
+      log.debug('Captured subtitle URL', { language });
     } catch (error) {
-      console.warn('[PrimeAdapter] Failed to parse subtitle URL:', error);
+      log.warn('Failed to parse subtitle URL', error instanceof Error ? { error: error.message } : { error });
     }
   }
   
@@ -518,21 +569,22 @@ export class PrimeAdapter implements PlatformAdapter {
         return;
       }
 
-      const observer = new MutationObserver(() => {
+      this.videoObserver = new MutationObserver(() => {
         const video = this.getVideoElement();
         if (video) {
-          observer.disconnect();
+          this.videoObserver?.disconnect();
+          this.videoObserver = null;
           resolve(video);
         }
       });
 
       const startObserving = (): void => {
-        if (document.body) {
-          observer.observe(document.body, {
+        if (document.body && this.videoObserver) {
+          this.videoObserver.observe(document.body, {
             childList: true,
             subtree: true,
           });
-        } else {
+        } else if (this.videoObserver) {
           setTimeout(startObserving, 10);
         }
       };
@@ -545,7 +597,10 @@ export class PrimeAdapter implements PlatformAdapter {
 
       // Timeout after 30 seconds
       setTimeout(() => {
-        observer.disconnect();
+        if (this.videoObserver) {
+          this.videoObserver.disconnect();
+          this.videoObserver = null;
+        }
         const video = this.getVideoElement();
         if (video) {
           resolve(video);

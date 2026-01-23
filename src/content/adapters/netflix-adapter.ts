@@ -19,6 +19,9 @@ import type {
   VideoEventCallback,
 } from './types';
 import { AdapterError, DEFAULT_RENDER_OPTIONS } from './types';
+import { createLogger } from '../../shared/utils/logger';
+
+const log = createLogger('NetflixAdapter');
 
 // ============================================================================
 // Types
@@ -64,6 +67,7 @@ export class NetflixAdapter implements PlatformAdapter {
   private originalXHROpen: typeof XMLHttpRequest.prototype.open | null = null;
   private capturedSubtitles: Map<string, { url: string; content: string; language: string }> = new Map();
   private initialized = false;
+  private videoObserver: MutationObserver | null = null;
   
   // ============================================================================
   // Public Methods
@@ -76,7 +80,7 @@ export class NetflixAdapter implements PlatformAdapter {
   async initialize(): Promise<void> {
     if (this.initialized) return;
     
-    console.log('[NetflixAdapter] Initializing...');
+    log.info('Initializing...');
     
     // Setup JSON.parse hook to intercept manifest
     this.setupJsonParseHook();
@@ -94,7 +98,7 @@ export class NetflixAdapter implements PlatformAdapter {
     setTimeout(() => this.extractTracksFromDOM(), 2000);
     
     this.initialized = true;
-    console.log('[NetflixAdapter] Initialized');
+    log.info('Initialized');
   }
   
   getVideoId(): string | null {
@@ -104,7 +108,7 @@ export class NetflixAdapter implements PlatformAdapter {
   }
   
   async getSubtitleTracks(): Promise<SubtitleTrack[]> {
-    console.log('[NetflixAdapter] getSubtitleTracks called. Current tracks:', this.subtitleTracks.length, 'Captured:', this.capturedSubtitles.size);
+    log.debug('getSubtitleTracks called', { currentTracks: this.subtitleTracks.length, captured: this.capturedSubtitles.size });
     
     // If we have captured subtitles but no tracks, create tracks from captures
     if (this.subtitleTracks.length === 0 && this.capturedSubtitles.size > 0) {
@@ -119,12 +123,12 @@ export class NetflixAdapter implements PlatformAdapter {
           isDefault: this.subtitleTracks.length === 0,
         });
       }
-      console.log('[NetflixAdapter] Created tracks from captured subtitles:', this.subtitleTracks.length);
+      log.debug('Created tracks from captured subtitles', { count: this.subtitleTracks.length });
     }
     
     // If no tracks yet, wait briefly for captures (user may have just enabled subtitles)
     if (this.subtitleTracks.length === 0) {
-      console.log('[NetflixAdapter] No tracks found, waiting for subtitle capture...');
+      log.debug('No tracks found, waiting for subtitle capture...');
       
       // Wait up to 3 seconds for subtitle to be captured
       const waitResult = await this.waitForSubtitleCapture(3000);
@@ -145,9 +149,9 @@ export class NetflixAdapter implements PlatformAdapter {
             });
           }
         }
-        console.log('[NetflixAdapter] Created tracks after wait:', this.subtitleTracks.length);
+        log.debug('Created tracks after wait', { count: this.subtitleTracks.length });
       } else {
-        console.log('[NetflixAdapter] No subtitles captured after waiting. Please enable subtitles in Netflix first.');
+        log.info('No subtitles captured after waiting. Please enable subtitles in Netflix first.');
       }
     }
     
@@ -187,16 +191,16 @@ export class NetflixAdapter implements PlatformAdapter {
   }
   
   async fetchSubtitle(track: SubtitleTrack): Promise<RawSubtitle> {
-    console.log('[NetflixAdapter] Fetching subtitle:', track.id, track.language);
+    log.debug('Fetching subtitle', { trackId: track.id, language: track.language });
     
     // First check if we have captured content for this track
     const captured = this.capturedSubtitles.get(track.language);
     if (captured?.content && captured.content.length > 0) {
-      console.log(`[NetflixAdapter] Using captured content for ${track.language}, length: ${captured.content.length}`);
+      log.debug('Using captured content', { language: track.language, length: captured.content.length });
       
       // Validate content before returning
       if (!this.isSubtitleContent(captured.content)) {
-        console.warn('[NetflixAdapter] Captured content is not valid subtitle format');
+        log.warn('Captured content is not valid subtitle format');
         throw new AdapterError(
           'SUBTITLE_FETCH_FAILED',
           'Captured content is not a valid subtitle format. Please try disabling and re-enabling subtitles in Netflix.',
@@ -217,11 +221,11 @@ export class NetflixAdapter implements PlatformAdapter {
     // Try to find any captured subtitle
     for (const [lang, subtitle] of this.capturedSubtitles) {
       if (subtitle.content && subtitle.content.length > 0) {
-        console.log(`[NetflixAdapter] Using available captured content from ${lang} (requested: ${track.language})`);
+        log.debug('Using available captured content', { available: lang, requested: track.language });
         
         // Validate content before returning
         if (!this.isSubtitleContent(subtitle.content)) {
-          console.warn('[NetflixAdapter] Captured content is not valid subtitle format');
+          log.warn('Captured content is not valid subtitle format');
           continue; // Try next captured subtitle
         }
         
@@ -238,7 +242,7 @@ export class NetflixAdapter implements PlatformAdapter {
     
     // Fallback: fetch from URL
     try {
-      console.log('[NetflixAdapter] No captured content, fetching from URL:', track.url);
+      log.debug('No captured content, fetching from URL', { url: track.url });
       const fetchFn = this.originalFetch || window.fetch;
       const response = await fetchFn.call(window, track.url);
       
@@ -283,7 +287,7 @@ export class NetflixAdapter implements PlatformAdapter {
     this.currentCues = cues;
     this.createOrUpdateOverlay(options);
     this.setupTimeSync();
-    console.log('[NetflixAdapter] Injected', cues.length, 'cues');
+    log.debug('Injected cues', { count: cues.length });
   }
   
   removeSubtitles(): void {
@@ -332,35 +336,41 @@ export class NetflixAdapter implements PlatformAdapter {
   }
   
   destroy(): void {
-    console.log('[NetflixAdapter] Destroying...');
-    
+    log.info('Destroying...');
+
+    // Disconnect video observer if still active
+    if (this.videoObserver) {
+      this.videoObserver.disconnect();
+      this.videoObserver = null;
+    }
+
     // Restore original JSON.parse
     if (this.originalJsonParse) {
       JSON.parse = this.originalJsonParse;
     }
-    
+
     // Restore original fetch
     if (this.originalFetch) {
       window.fetch = this.originalFetch;
     }
-    
+
     // Restore original XHR
     if (this.originalXHROpen) {
       XMLHttpRequest.prototype.open = this.originalXHROpen;
     }
-    
+
     // Cleanup event listeners
     for (const cleanup of this.eventListeners.values()) {
       cleanup();
     }
     this.eventListeners.clear();
-    
+
     // Clear captured subtitles
     this.capturedSubtitles.clear();
-    
+
     // Remove overlay
     this.removeSubtitles();
-    
+
     this.initialized = false;
   }
   
@@ -374,21 +384,34 @@ export class NetflixAdapter implements PlatformAdapter {
   private setupJsonParseHook(): void {
     this.originalJsonParse = JSON.parse;
     const self = this;
-    
+
     JSON.parse = function(text: string, reviver?: (key: string, value: unknown) => unknown): unknown {
-      const result = self.originalJsonParse!.call(this, text, reviver);
-      
-      // Check if this looks like a Netflix manifest with timed text tracks
-      if (self.isNetflixManifest(result)) {
-        console.log('[NetflixAdapter] Intercepted Netflix manifest');
-        self.extractSubtitleTracks(result as NetflixManifest);
+      // Safety check: if originalJsonParse is gone, use the built-in
+      const jsonParse = self.originalJsonParse || JSON.parse;
+
+      let result: unknown;
+      try {
+        result = jsonParse.call(this, text, reviver);
+      } catch (error) {
+        // If parsing fails, re-throw the error as the caller expects
+        throw error;
       }
-      
+
+      // Check if this looks like a Netflix manifest with timed text tracks (wrap in try-catch)
+      try {
+        if (self.isNetflixManifest(result)) {
+          log.debug('Intercepted Netflix manifest');
+          self.extractSubtitleTracks(result as NetflixManifest);
+        }
+      } catch (error) {
+        log.warn('Failed to extract from Netflix manifest', { error: String(error) });
+      }
+
       return result;
     };
-    
-    console.log('[NetflixAdapter] JSON.parse hook installed');
-    
+
+    log.debug('JSON.parse hook installed');
+
     // Also try to extract from existing Netflix player API
     this.tryExtractFromPlayerAPI();
   }
@@ -436,14 +459,14 @@ export class NetflixAdapter implements PlatformAdapter {
           const tracks = player?.getTimedTextTrackList?.();
           
           if (tracks && tracks.length > 0) {
-            console.log('[NetflixAdapter] Found tracks from player API:', tracks.length);
+            log.debug('Found tracks from player API', { count: tracks.length });
             this.extractTracksFromPlayerAPI(tracks);
             return;
           }
         }
       }
     } catch (error) {
-      console.warn('[NetflixAdapter] Failed to extract from player API:', error);
+      log.warn('Failed to extract from player API', error instanceof Error ? { error: error.message } : { error });
     }
     
     // Try again after a delay (player might not be ready)
@@ -478,7 +501,7 @@ export class NetflixAdapter implements PlatformAdapter {
       });
     }
     
-    console.log('[NetflixAdapter] Extracted', this.subtitleTracks.length, 'tracks from player API');
+    log.debug('Extracted tracks from player API', { count: this.subtitleTracks.length });
   }
   
   /**
@@ -491,7 +514,7 @@ export class NetflixAdapter implements PlatformAdapter {
     const subtitleItems = document.querySelectorAll('[data-uia="subtitle-item"]');
     
     if (subtitleItems.length > 0) {
-      console.log('[NetflixAdapter] Found subtitle items in DOM:', subtitleItems.length);
+      log.debug('Found subtitle items in DOM', { count: subtitleItems.length });
       // Note: DOM doesn't give us URLs, but we can at least detect available languages
       // User will need to trigger subtitle load by selecting from Netflix's menu
     }
@@ -514,7 +537,7 @@ export class NetflixAdapter implements PlatformAdapter {
     for (const selector of selectors) {
       const items = document.querySelectorAll(selector);
       if (items.length > 0) {
-        console.log(`[NetflixAdapter] Found ${items.length} subtitle items in DOM via ${selector}`);
+        log.debug('Found subtitle items in DOM', { count: items.length, selector });
         break;
       }
     }
@@ -545,7 +568,7 @@ export class NetflixAdapter implements PlatformAdapter {
     
     const container = findContainer();
     if (container) {
-      console.log('[NetflixAdapter] Found subtitle container, setting up observer');
+      log.debug('Found subtitle container, setting up observer');
       
       // Create a simple track from observed subtitles
       if (this.subtitleTracks.length === 0) {
@@ -558,7 +581,7 @@ export class NetflixAdapter implements PlatformAdapter {
           isAutoGenerated: false,
           isDefault: true,
         });
-        console.log('[NetflixAdapter] Created placeholder track for live subtitles');
+        log.debug('Created placeholder track for live subtitles');
       }
     }
   }
@@ -604,7 +627,7 @@ export class NetflixAdapter implements PlatformAdapter {
             
             // Only capture if it's actually subtitle content (TTML/XML/VTT)
             if (content && adapter.isSubtitleContent(content)) {
-              console.log('[NetflixAdapter] Captured subtitle from XHR:', urlStr.substring(0, 80));
+              log.debug('Captured subtitle from XHR', { url: urlStr.substring(0, 80) });
               adapter.captureSubtitleContent(urlStr, content);
             }
           } catch {
@@ -617,7 +640,7 @@ export class NetflixAdapter implements PlatformAdapter {
       adapter.originalXHROpen!.call(this, method, url, async, username ?? null, password ?? null);
     };
     
-    console.log('[NetflixAdapter] XHR interception enabled');
+    log.debug('XHR interception enabled');
   }
   
   /**
@@ -694,27 +717,27 @@ export class NetflixAdapter implements PlatformAdapter {
       
       // Debug: Log all non-chunk fetch requests to help diagnose subtitle capture issues
       if (!isVideoChunk && (url.includes('nflx') || url.includes('netflix'))) {
-        console.log('[NetflixAdapter] Fetch request:', url.substring(0, 120));
+        log.debug('Fetch request', { url: url.substring(0, 120) });
       }
       
       // Check if this might be a subtitle request
       if (!isVideoChunk && adapter.isPotentialSubtitleUrl(url)) {
-        console.log('[NetflixAdapter] Potential subtitle URL detected:', url.substring(0, 100));
+        log.debug('Potential subtitle URL detected', { url: url.substring(0, 100) });
         const response = await adapter.originalFetch!.call(window, input, init);
         const clonedResponse = response.clone();
         
         try {
           const content = await clonedResponse.text();
-          console.log('[NetflixAdapter] Fetch response content length:', content.length, 'first 100 chars:', content.substring(0, 100));
+          log.debug('Fetch response content', { length: content.length, preview: content.substring(0, 100) });
           // Only capture if it's actually subtitle content
           if (content && adapter.isSubtitleContent(content)) {
-            console.log('[NetflixAdapter] Captured subtitle from fetch:', url.substring(0, 80));
+            log.debug('Captured subtitle from fetch', { url: url.substring(0, 80) });
             adapter.captureSubtitleContent(url, content);
           } else {
-            console.log('[NetflixAdapter] Not subtitle content, skipping');
+            log.debug('Not subtitle content, skipping');
           }
         } catch (e) {
-          console.warn('[NetflixAdapter] Failed to read fetch response:', e);
+          log.warn('Failed to read fetch response', e instanceof Error ? { error: e.message } : { error: e });
         }
         
         return response;
@@ -723,7 +746,7 @@ export class NetflixAdapter implements PlatformAdapter {
       return adapter.originalFetch!.call(window, input, init);
     };
     
-    console.log('[NetflixAdapter] Fetch interception enabled');
+    log.debug('Fetch interception enabled');
   }
   
   /**
@@ -772,7 +795,7 @@ export class NetflixAdapter implements PlatformAdapter {
       language,
     });
     
-    console.log(`[NetflixAdapter] Captured subtitle content: ${language}, length: ${content.length}`);
+    log.debug('Captured subtitle content', { language, length: content.length });
     
     // If we don't have this language in tracks, add it
     const existingTrack = this.subtitleTracks.find(t => t.language === language);
@@ -811,8 +834,7 @@ export class NetflixAdapter implements PlatformAdapter {
     // If content doesn't look like a valid subtitle format, still return ttml
     // but log a warning - the parser will provide a better error message
     if (!cleaned.startsWith('<')) {
-      console.warn('[NetflixAdapter] Content does not appear to be valid subtitle format:', 
-        cleaned.substring(0, 100));
+      log.warn('Content does not appear to be valid subtitle format', { preview: cleaned.substring(0, 100) });
     }
     
     return 'ttml';  // Netflix default
@@ -865,7 +887,7 @@ export class NetflixAdapter implements PlatformAdapter {
       });
     }
     
-    console.log('[NetflixAdapter] Extracted', this.subtitleTracks.length, 'subtitle tracks');
+    log.debug('Extracted subtitle tracks', { count: this.subtitleTracks.length });
   }
   
   /**
@@ -901,22 +923,24 @@ export class NetflixAdapter implements PlatformAdapter {
         return;
       }
 
-      const observer = new MutationObserver(() => {
+      // Store observer reference for cleanup
+      this.videoObserver = new MutationObserver(() => {
         const video = document.querySelector('video');
         if (video) {
           this.videoElement = video;
-          observer.disconnect();
+          this.videoObserver?.disconnect();
+          this.videoObserver = null;
           resolve(video);
         }
       });
 
       const startObserving = (): void => {
-        if (document.body) {
-          observer.observe(document.body, {
+        if (document.body && this.videoObserver) {
+          this.videoObserver.observe(document.body, {
             childList: true,
             subtree: true,
           });
-        } else {
+        } else if (this.videoObserver) {
           setTimeout(startObserving, 10);
         }
       };
@@ -929,7 +953,8 @@ export class NetflixAdapter implements PlatformAdapter {
 
       // Timeout after 30 seconds
       setTimeout(() => {
-        observer.disconnect();
+        this.videoObserver?.disconnect();
+        this.videoObserver = null;
         const video = document.querySelector('video');
         if (video) {
           this.videoElement = video;

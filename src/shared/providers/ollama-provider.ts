@@ -22,6 +22,7 @@ import type {
 } from './types';
 import { ProviderError } from './types';
 import { API_ENDPOINTS, TRANSLATION_CONFIG } from '../utils/constants';
+import { fetchWithRetry, RetryStrategies, type RetryStrategy } from '../utils/error-handler';
 
 // ============================================================================
 // Types
@@ -72,11 +73,21 @@ export class OllamaProvider implements TranslationProvider {
   
   // Available models will be populated from Ollama API
   private _availableModels: ModelInfo[] = [];
-  
+
   private endpoint: string;
   private currentModel: string = '';
   private isConnected: boolean = false;
-  
+
+  // Custom retry strategy for Ollama (local service, quick retries)
+  private readonly retryStrategy: RetryStrategy = {
+    ...RetryStrategies.network,
+    maxAttempts: 3,
+    baseDelayMs: 500,
+    maxDelayMs: 3000,
+    backoffMultiplier: 1.5,
+    retryableStatuses: [408, 500, 502, 503, 504],
+  };
+
   constructor(config?: AuthProvider) {
     // Get endpoint from config or use default
     if (config?.credentials?.type === 'ollama') {
@@ -115,26 +126,59 @@ export class OllamaProvider implements TranslationProvider {
    */
   async testConnection(): Promise<{ success: boolean; error?: string }> {
     try {
+      // Use AbortController with timeout to prevent hanging
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+
       const response = await fetch(`${this.endpoint}/api/tags`, {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
       });
-      
+
+      clearTimeout(timeoutId);
+
       if (response.ok) {
         this.isConnected = true;
         return { success: true };
       }
-      
-      return { 
-        success: false, 
-        error: `Connection failed: ${response.status} ${response.statusText}` 
+
+      return {
+        success: false,
+        error: `Connection failed: ${response.status} ${response.statusText}`
       };
     } catch (error) {
       this.isConnected = false;
-      return { 
-        success: false, 
-        error: error instanceof Error ? error.message : 'Connection failed' 
+      if (error instanceof Error && error.name === 'AbortError') {
+        return {
+          success: false,
+          error: 'Connection timed out. Is Ollama running?'
+        };
+      }
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Connection failed'
       };
+    }
+  }
+
+  /**
+   * Quick health check - faster than testConnection, just checks if endpoint is reachable
+   */
+  async healthCheck(): Promise<boolean> {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 2000);
+
+      const response = await fetch(`${this.endpoint}/api/tags`, {
+        method: 'HEAD',
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+      return response.ok;
+    } catch {
+      return false;
     }
   }
   
@@ -251,7 +295,7 @@ export class OllamaProvider implements TranslationProvider {
   
   async translate(request: TranslationRequest): Promise<TranslationResult> {
     const model = request.model || this.currentModel || this._availableModels[0]?.id;
-    
+
     if (!model) {
       throw new ProviderError(
         'MODEL_NOT_FOUND',
@@ -260,27 +304,38 @@ export class OllamaProvider implements TranslationProvider {
         false
       );
     }
-    
+
     const messages = this.buildMessages(request);
-    
-    const response = await fetch(`${this.endpoint}/api/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model,
-        messages,
-        stream: false,
-        options: {
-          temperature: 0.3,
-          num_predict: 8192,
+
+    // Use fetchWithRetry for automatic retry on network failures
+    const response = await fetchWithRetry(
+      `${this.endpoint}/api/chat`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model,
+          messages,
+          stream: false,
+          options: {
+            temperature: 0.3,
+            num_predict: 8192,
+          },
+        }),
+        timeout: 60000, // 60 second timeout for local model inference
+      },
+      {
+        strategy: this.retryStrategy,
+        onRetry: (attempt, error, delay) => {
+          console.debug(`[Ollama] Retry ${attempt}: ${error.message}, waiting ${delay}ms`);
         },
-      }),
-    });
-    
+      }
+    );
+
     if (!response.ok) {
       throw await this.handleApiError(response);
     }
-    
+
     const data = await response.json() as OllamaChatResponse;
     return this.parseResponse(data, request);
   }

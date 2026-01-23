@@ -1,10 +1,10 @@
 /**
  * Cache Utilities
- * 
+ *
  * Helper functions for cache key generation and validation.
- * 
+ *
  * @see specs/001-ai-subtitle-translator/data-model.md - Cache Key Format
- * @see Constitution VII: Cache key format ${videoId}:${sourceLanguage}:${targetLanguage}:${providerModel}
+ * @see Constitution VII: Cache key format ${platform}:${videoId}:${sourceLanguage}:${targetLanguage}:${providerModel}
  */
 
 import type { CacheKey, SerializedCacheKey } from '../types/translation';
@@ -19,20 +19,23 @@ import { serializeCacheKey, parseCacheKey } from '../types/translation';
  * Create a cache key from components
  */
 export function createCacheKey(
+  platform: string,
   videoId: string,
   sourceLanguage: string,
   targetLanguage: string,
   provider: ProviderType,
   model?: string
 ): CacheKey {
-  // Normalize languages to lowercase
+  // Normalize platform and languages to lowercase
+  const normalizedPlatform = platform.toLowerCase();
   const normalizedSource = sourceLanguage.toLowerCase();
   const normalizedTarget = targetLanguage.toLowerCase();
-  
+
   // Combine provider and model
   const providerModel = model ? `${provider}:${model}` : provider;
-  
+
   return {
+    platform: normalizedPlatform,
     videoId,
     sourceLanguage: normalizedSource,
     targetLanguage: normalizedTarget,
@@ -50,13 +53,14 @@ export { serializeCacheKey, parseCacheKey };
  * Create a serialized cache key directly from components
  */
 export function createSerializedCacheKey(
+  platform: string,
   videoId: string,
   sourceLanguage: string,
   targetLanguage: string,
   provider: ProviderType,
   model?: string
 ): SerializedCacheKey {
-  const key = createCacheKey(videoId, sourceLanguage, targetLanguage, provider, model);
+  const key = createCacheKey(platform, videoId, sourceLanguage, targetLanguage, provider, model);
   return serializeCacheKey(key);
 }
 
@@ -71,10 +75,12 @@ export function isValidCacheKey(key: unknown): key is CacheKey {
   if (!key || typeof key !== 'object') {
     return false;
   }
-  
+
   const k = key as Record<string, unknown>;
-  
+
   return (
+    typeof k.platform === 'string' &&
+    k.platform.length > 0 &&
     typeof k.videoId === 'string' &&
     k.videoId.length > 0 &&
     typeof k.sourceLanguage === 'string' &&
@@ -103,6 +109,7 @@ export function isValidSerializedKey(serialized: string): boolean {
  */
 export function cacheKeysMatch(a: CacheKey, b: CacheKey): boolean {
   return (
+    a.platform.toLowerCase() === b.platform.toLowerCase() &&
     a.videoId === b.videoId &&
     a.sourceLanguage.toLowerCase() === b.sourceLanguage.toLowerCase() &&
     a.targetLanguage.toLowerCase() === b.targetLanguage.toLowerCase() &&
@@ -117,6 +124,9 @@ export function cacheKeyMatchesPartial(
   key: CacheKey,
   partial: Partial<CacheKey>
 ): boolean {
+  if (partial.platform && key.platform.toLowerCase() !== partial.platform.toLowerCase()) {
+    return false;
+  }
   if (partial.videoId && key.videoId !== partial.videoId) {
     return false;
   }

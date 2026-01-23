@@ -11,6 +11,9 @@
 import { messageHandler, sendToTab } from './message-handler';
 import { translationService } from './translation-service';
 import { successResponse } from '../shared/types/messages';
+import { createLogger } from '../shared/utils/logger';
+
+const log = createLogger('Background');
 import type {
   SubtitleDetectedMessage,
   RequestTranslationMessage,
@@ -52,11 +55,19 @@ declare const __PRELOADED_CHATGPT_TOKEN__: {
 // Service Worker Initialization
 // ============================================================================
 
-console.log('[Background] AI Subtitle Translator Service Worker initialized');
+log.info('AI Subtitle Translator Service Worker initialized');
 
 // ============================================================================
 // Helper Functions
 // ============================================================================
+
+// Helper to normalize unknown errors for logging
+function normalizeError(error: unknown): Record<string, unknown> {
+  if (error instanceof Error) {
+    return { error: error.message, name: error.name };
+  }
+  return { error: String(error) };
+}
 
 /**
  * Get the currently selected provider from auth config
@@ -67,7 +78,7 @@ async function getSelectedProvider(): Promise<ProviderType> {
     const authConfig = await getAuthConfig();
     return authConfig.selectedProvider || 'google-translate';
   } catch (error) {
-    console.warn('[Background] Failed to get auth config, using default provider:', error);
+    log.warn('Failed to get auth config, using default provider', error instanceof Error ? { error: error.message } : { error });
     return 'google-translate';
   }
 }
@@ -85,14 +96,14 @@ async function initializePreloadedTokens(): Promise<void> {
   if (__PRELOADED_CLAUDE_TOKEN__) {
     const existing = await getValidClaudeToken();
     if (!existing) {
-      console.log('[Background] Initializing preloaded Claude token');
+      log.info('Initializing preloaded Claude token');
       await storeClaudeTokens({
         accessToken: __PRELOADED_CLAUDE_TOKEN__.accessToken,
         refreshToken: __PRELOADED_CLAUDE_TOKEN__.refreshToken || undefined,
         expiresAt: __PRELOADED_CLAUDE_TOKEN__.expiresAt || undefined,
       });
     } else {
-      console.log('[Background] Claude token already exists, skipping preload');
+      log.debug('Claude token already exists, skipping preload');
     }
   }
   
@@ -100,14 +111,14 @@ async function initializePreloadedTokens(): Promise<void> {
   if (__PRELOADED_CHATGPT_TOKEN__) {
     const existing = await getValidChatGPTToken();
     if (!existing) {
-      console.log('[Background] Initializing preloaded ChatGPT token');
+      log.info('Initializing preloaded ChatGPT token');
       await storeChatGPTTokens({
         accessToken: __PRELOADED_CHATGPT_TOKEN__.accessToken,
         refreshToken: __PRELOADED_CHATGPT_TOKEN__.refreshToken || undefined,
         expiresAt: __PRELOADED_CHATGPT_TOKEN__.expiresAt || undefined,
       });
     } else {
-      console.log('[Background] ChatGPT token already exists, skipping preload');
+      log.debug('ChatGPT token already exists, skipping preload');
     }
   }
 }
@@ -123,7 +134,7 @@ void initializePreloadedTokens();
 messageHandler.on('SUBTITLE_DETECTED', async (message: SubtitleDetectedMessage, _sender) => {
   const { platform, videoId, subtitleUrl, sourceLanguage, format } = message.payload;
   
-  console.log('[Background] Subtitle detected:', {
+  log.debug('Subtitle detected', {
     platform,
     videoId,
     sourceLanguage,
@@ -140,6 +151,7 @@ messageHandler.on('SUBTITLE_DETECTED', async (message: SubtitleDetectedMessage, 
     
     // Check cache for existing translation
     const cacheResult = await translationService.checkCache(
+      platform,
       videoId,
       sourceLanguage,
       targetLanguage,
@@ -147,7 +159,7 @@ messageHandler.on('SUBTITLE_DETECTED', async (message: SubtitleDetectedMessage, 
     );
     
     if (cacheResult.hit) {
-      console.log(`[Background] Subtitle already cached (${cacheResult.source}) for ${videoId}`);
+      log.debug('Subtitle already cached', { source: cacheResult.source, videoId });
       return successResponse({
         cached: true,
         cacheStatus: 'hit',
@@ -159,7 +171,7 @@ messageHandler.on('SUBTITLE_DETECTED', async (message: SubtitleDetectedMessage, 
       cacheStatus: undefined,
     });
   } catch (error) {
-    console.error('[Background] Cache check failed:', error);
+    log.error('Cache check failed', error instanceof Error ? error : { error });
     return successResponse({
       cached: false,
       cacheStatus: undefined,
@@ -172,7 +184,7 @@ messageHandler.on('REQUEST_TRANSLATION', async (message: RequestTranslationMessa
   const { subtitleId, videoId, platform, sourceLanguage, targetLanguage, cues, startFromIndex } = message.payload;
   const tabId = sender.tab?.id;
   
-  console.log('[Background] Translation requested:', {
+  log.debug('[Background] Translation requested:', {
     subtitleId,
     videoId,
     platform,
@@ -184,7 +196,7 @@ messageHandler.on('REQUEST_TRANSLATION', async (message: RequestTranslationMessa
   });
   
   if (!tabId) {
-    console.error('[Background] No tab ID found in sender');
+    log.error('[Background] No tab ID found in sender');
     return {
       success: false,
       error: {
@@ -208,36 +220,68 @@ messageHandler.on('REQUEST_TRANSLATION', async (message: RequestTranslationMessa
       case 'google-translate':
         credentials = { type: 'google-translate' };
         break;
-      case 'ollama':
+      case 'ollama': {
+        const ollamaEndpoint = config?.apiEndpoint || 'http://localhost:11434';
+        // Quick health check for Ollama before starting translation
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 3000);
+          const healthResponse = await fetch(`${ollamaEndpoint}/api/tags`, {
+            method: 'HEAD',
+            signal: controller.signal,
+          });
+          clearTimeout(timeoutId);
+          if (!healthResponse.ok) {
+            throw new Error('Ollama is not responding');
+          }
+        } catch (err) {
+          const errorMsg = err instanceof Error && err.name === 'AbortError'
+            ? 'Ollama connection timed out. Is Ollama running?'
+            : 'Cannot connect to Ollama. Please ensure Ollama is running.';
+          throw new Error(errorMsg);
+        }
         credentials = {
           type: 'ollama',
-          endpoint: config?.apiEndpoint || 'http://localhost:11434',
+          endpoint: ollamaEndpoint,
           model: config?.model || 'llama3.2',
         };
         break;
+      }
       case 'claude-api':
-      case 'openai-api':
+      case 'openai-api': {
+        // Validate API key is configured before starting translation
+        const apiKey = config?.apiKey;
+        if (!apiKey) {
+          throw new Error(`${providerType === 'claude-api' ? 'Claude' : 'OpenAI'} API key not configured. Please configure it in Options.`);
+        }
         credentials = {
           type: 'api-key',
-          encryptedApiKey: config?.apiKey || '',
+          encryptedApiKey: apiKey,
           model: config?.model || (providerType === 'claude-api' ? 'claude-sonnet-4-20250514' : 'gpt-4o'),
         };
         break;
+      }
       case 'claude-subscription': {
         // Get OAuth token (automatically refreshes if expired)
         const claudeToken = await getValidClaudeToken();
+        if (!claudeToken) {
+          throw new Error('Claude subscription token expired or not configured. Please re-authenticate in Options.');
+        }
         credentials = {
           type: 'oauth',
-          accessToken: claudeToken || '',
+          accessToken: claudeToken,
         };
         break;
       }
       case 'chatgpt-subscription': {
         // Get OAuth token (automatically refreshes if expired)
         const chatgptToken = await getValidChatGPTToken();
+        if (!chatgptToken) {
+          throw new Error('ChatGPT subscription token expired or not configured. Please re-authenticate in Options.');
+        }
         credentials = {
           type: 'oauth',
-          accessToken: chatgptToken || '',
+          accessToken: chatgptToken,
         };
         break;
       }
@@ -269,14 +313,14 @@ messageHandler.on('REQUEST_TRANSLATION', async (message: RequestTranslationMessa
       startFromIndex,
     });
     
-    console.log(`[Background] Translation job started: ${jobId}`);
+    log.debug(`[Background] Translation job started: ${jobId}`);
     
     return successResponse({
       jobId,
       status: 'started' as const,
     });
   } catch (error) {
-    console.error('[Background] Failed to start translation:', error);
+    log.error('Failed to start translation', normalizeError(error));
     return {
       success: false,
       error: {
@@ -291,10 +335,10 @@ messageHandler.on('REQUEST_TRANSLATION', async (message: RequestTranslationMessa
 messageHandler.on('CANCEL_TRANSLATION', async (message: CancelTranslationMessage, _sender) => {
   const { jobId } = message.payload;
   
-  console.log('[Background] Translation cancel requested:', { jobId });
+  log.debug('[Background] Translation cancel requested:', { jobId });
   
   const cancelled = translationService.cancelTranslation(jobId);
-  console.log(`[Background] Translation cancellation result: ${cancelled}`);
+  log.debug(`[Background] Translation cancellation result: ${cancelled}`);
   
   return successResponse({
     cancelled,
@@ -303,22 +347,24 @@ messageHandler.on('CANCEL_TRANSLATION', async (message: CancelTranslationMessage
 
 // Handler for GET_CACHED_TRANSLATION
 messageHandler.on('GET_CACHED_TRANSLATION', async (message: GetCachedTranslationMessage, _sender) => {
-  const { videoId, sourceLanguage, targetLanguage } = message.payload;
-  
+  const { platform, videoId, sourceLanguage, targetLanguage } = message.payload;
+
   // Get provider from auth config (source of truth)
   const providerType = await getSelectedProvider();
-  
-  console.log('[Background] Cache lookup:', {
+
+  log.debug('[Background] Cache lookup:', {
+    platform,
     videoId,
     sourceLanguage,
     targetLanguage,
     providerType,
     model: 'default',
   });
-  
+
   try {
     // Check cache - use 'default' model to match the key used when saving
     const cacheResult = await translationService.checkCache(
+      platform,
       videoId,
       sourceLanguage,
       targetLanguage,
@@ -326,14 +372,14 @@ messageHandler.on('GET_CACHED_TRANSLATION', async (message: GetCachedTranslation
       'default'
     );
     
-    console.log('[Background] Cache result:', {
+    log.debug('[Background] Cache result:', {
       hit: cacheResult.hit,
       source: cacheResult.source,
       hasCues: !!cacheResult.subtitle?.cues?.length,
     });
     
     if (cacheResult.hit && cacheResult.subtitle) {
-      console.log(`[Background] Cache hit (${cacheResult.source}) for ${videoId}`);
+      log.debug(`[Background] Cache hit (${cacheResult.source}) for ${videoId}`);
       return successResponse({
         found: true,
         subtitle: cacheResult.subtitle,
@@ -347,7 +393,7 @@ messageHandler.on('GET_CACHED_TRANSLATION', async (message: GetCachedTranslation
       lastAccessedAt: undefined,
     });
   } catch (error) {
-    console.error('[Background] Cache lookup failed:', error);
+    log.error('Cache lookup failed', normalizeError(error));
     return successResponse({
       found: false,
       subtitle: undefined,
@@ -358,18 +404,18 @@ messageHandler.on('GET_CACHED_TRANSLATION', async (message: GetCachedTranslation
 
 // Handler for GET_AUTH_STATUS
 messageHandler.on('GET_AUTH_STATUS', async (_message: GetAuthStatusMessage, _sender) => {
-  console.log('[Background] Auth status requested');
+  log.debug('[Background] Auth status requested');
   
   try {
     // Get full auth config (source of truth)
     const authConfig = await getAuthConfig();
     const selectedProvider = authConfig.selectedProvider || 'google-translate';
     
-    console.log(`[Background] Auth status check for provider: ${selectedProvider}`);
+    log.debug(`[Background] Auth status check for provider: ${selectedProvider}`);
     
     // Google Translate doesn't need any auth
     if (selectedProvider === 'google-translate') {
-      console.log(`[Background] Provider ${selectedProvider} requires no auth`);
+      log.debug(`[Background] Provider ${selectedProvider} requires no auth`);
       return successResponse({
         configured: true,
         provider: selectedProvider,
@@ -379,7 +425,7 @@ messageHandler.on('GET_AUTH_STATUS', async (_message: GetAuthStatusMessage, _sen
     
     // Ollama just needs endpoint (optional, has default)
     if (selectedProvider === 'ollama') {
-      console.log(`[Background] Provider ${selectedProvider} requires no auth`);
+      log.debug(`[Background] Provider ${selectedProvider} requires no auth`);
       return successResponse({
         configured: true,
         provider: selectedProvider,
@@ -391,7 +437,7 @@ messageHandler.on('GET_AUTH_STATUS', async (_message: GetAuthStatusMessage, _sen
     if (selectedProvider === 'claude-subscription') {
       const claudeToken = await getValidClaudeToken();
       if (claudeToken) {
-        console.log(`[Background] Provider ${selectedProvider} has valid token`);
+        log.debug(`[Background] Provider ${selectedProvider} has valid token`);
         return successResponse({
           configured: true,
           provider: selectedProvider,
@@ -403,7 +449,7 @@ messageHandler.on('GET_AUTH_STATUS', async (_message: GetAuthStatusMessage, _sen
     if (selectedProvider === 'chatgpt-subscription') {
       const chatgptToken = await getValidChatGPTToken();
       if (chatgptToken) {
-        console.log(`[Background] Provider ${selectedProvider} has valid token`);
+        log.debug(`[Background] Provider ${selectedProvider} has valid token`);
         return successResponse({
           configured: true,
           provider: selectedProvider,
@@ -415,7 +461,7 @@ messageHandler.on('GET_AUTH_STATUS', async (_message: GetAuthStatusMessage, _sen
     // For API providers, check if credentials exist in config
     const providerConfig = authConfig.providers[selectedProvider];
     if (providerConfig?.apiKey || providerConfig?.endpoint) {
-      console.log(`[Background] Provider ${selectedProvider} is configured`);
+      log.debug(`[Background] Provider ${selectedProvider} is configured`);
       return successResponse({
         configured: true,
         provider: selectedProvider,
@@ -423,14 +469,14 @@ messageHandler.on('GET_AUTH_STATUS', async (_message: GetAuthStatusMessage, _sen
       });
     }
     
-    console.log(`[Background] Provider ${selectedProvider} is not configured`);
+    log.debug(`[Background] Provider ${selectedProvider} is not configured`);
     return successResponse({
       configured: false,
       provider: selectedProvider,
       status: { state: 'unconfigured' },
     });
   } catch (error) {
-    console.error('[Background] Auth status check failed:', error);
+    log.error('Auth status check failed', normalizeError(error));
     // Default to google-translate which doesn't need config
     return successResponse({
       configured: true,
@@ -447,7 +493,7 @@ messageHandler.on('TRANSLATE_TEXT', async (message: TranslateTextMessage, _sende
   // Use forced provider if specified, otherwise get from auth config
   const providerType = forceProvider || await getSelectedProvider();
 
-  console.log('[Background] Real-time translation requested:', {
+  log.debug('[Background] Real-time translation requested:', {
     textLength: text.length,
     sourceLanguage,
     targetLanguage,
@@ -534,7 +580,7 @@ messageHandler.on('TRANSLATE_TEXT', async (message: TranslateTextMessage, _sende
 
     const translatedText = result.cues[0]?.translatedText || text;
 
-    console.log('[Background] Real-time translation completed:', {
+    log.debug('[Background] Real-time translation completed:', {
       original: text.substring(0, 50),
       translated: translatedText.substring(0, 50),
     });
@@ -544,7 +590,7 @@ messageHandler.on('TRANSLATE_TEXT', async (message: TranslateTextMessage, _sende
       cached: false,
     });
   } catch (error) {
-    console.error('[Background] Real-time translation failed:', error);
+    log.error('Real-time translation failed', normalizeError(error));
     return {
       success: false,
       error: {
@@ -566,10 +612,10 @@ messageHandler.on('TRANSLATE_BATCH', async (message: TranslateBatchMessage, _sen
   // Debug: Also get the full auth config to see what's stored (only for non-google providers)
   if (providerType !== 'google-translate') {
     const fullAuthConfig = await getAuthConfig();
-    console.log('[Background] Full auth config:', JSON.stringify(fullAuthConfig, null, 2));
+    log.debug('Full auth config', { config: fullAuthConfig });
   }
 
-  console.log('[Background] Batch translation requested:', {
+  log.debug('[Background] Batch translation requested:', {
     cueCount: cues.length,
     sourceLanguage,
     targetLanguage,
@@ -581,7 +627,7 @@ messageHandler.on('TRANSLATE_BATCH', async (message: TranslateBatchMessage, _sen
   try {
     // Fast path for Google Translate - skip all OAuth/API key logic
     if (providerType === 'google-translate') {
-      console.log('[Background] Using Google Translate provider - fast path');
+      log.debug('[Background] Using Google Translate provider - fast path');
       
       const credentials: ProviderCredentials = { type: 'google-translate' };
       const provider: AuthProvider = {
@@ -637,7 +683,7 @@ messageHandler.on('TRANSLATE_BATCH', async (message: TranslateBatchMessage, _sen
         break;
       case 'claude-subscription': {
         const claudeToken = await getValidClaudeToken();
-        console.log('[Background] Claude token for batch:', { hasToken: !!claudeToken });
+        log.debug('[Background] Claude token for batch:', { hasToken: !!claudeToken });
         if (!claudeToken) {
           throw new Error('Claude token expired. Please re-authenticate in Options.');
         }
@@ -648,9 +694,9 @@ messageHandler.on('TRANSLATE_BATCH', async (message: TranslateBatchMessage, _sen
         break;
       }
       case 'chatgpt-subscription': {
-        console.log('[Background] ChatGPT subscription provider - getting OAuth token');
+        log.debug('[Background] ChatGPT subscription provider - getting OAuth token');
         const chatgptToken = await getValidChatGPTToken();
-        console.log('[Background] ChatGPT token for batch:', { hasToken: !!chatgptToken });
+        log.debug('[Background] ChatGPT token for batch:', { hasToken: !!chatgptToken });
         if (!chatgptToken) {
           throw new Error('ChatGPT token expired. Please re-authenticate in Options.');
         }
@@ -694,13 +740,48 @@ messageHandler.on('TRANSLATE_BATCH', async (message: TranslateBatchMessage, _sen
         : '';
 
     // Translate batch with proper cue structure
-    const result = await translationProvider.translate({
-      cues: cues.map(c => ({ index: c.index, text: c.text })),
-      sourceLanguage,
-      targetLanguage,
-      model,
-      previousContext,
-    });
+    let result;
+    let usedFallback = false;
+
+    try {
+      result = await translationProvider.translate({
+        cues: cues.map(c => ({ index: c.index, text: c.text })),
+        sourceLanguage,
+        targetLanguage,
+        model,
+        previousContext,
+      });
+    } catch (providerError) {
+      // Primary provider failed, try fallback to Google Translate
+      // Note: We already returned early for google-translate, so this is always a fallback case
+      log.warn('Primary provider failed, falling back to Google Translate', normalizeError(providerError));
+
+      try {
+        const fallbackProvider: AuthProvider = {
+          type: 'google-translate',
+          credentials: { type: 'google-translate' },
+          status: { state: 'valid', validatedAt: new Date().toISOString() },
+          configuredAt: new Date().toISOString(),
+        };
+
+        const googleProvider = ProviderFactory.tryCreate(fallbackProvider);
+        if (googleProvider) {
+          result = await googleProvider.translate({
+            cues: cues.map(c => ({ index: c.index, text: c.text })),
+            sourceLanguage,
+            targetLanguage,
+            model: '',
+          });
+          usedFallback = true;
+          log.info('Fallback to Google Translate succeeded');
+        } else {
+          throw providerError; // Re-throw original error if fallback not available
+        }
+      } catch (fallbackError) {
+        log.error('Fallback translation also failed', normalizeError(fallbackError));
+        throw providerError; // Throw original error
+      }
+    }
 
     // Build context for next batch (last 3 translations)
     const lastCues = result.cues.slice(-3);
@@ -714,9 +795,10 @@ messageHandler.on('TRANSLATE_BATCH', async (message: TranslateBatchMessage, _sen
       }),
     };
 
-    console.log('[Background] Batch translation completed:', {
+    log.debug('Batch translation completed', {
       inputCount: cues.length,
       outputCount: result.cues.length,
+      usedFallback,
     });
 
     return successResponse({
@@ -725,9 +807,10 @@ messageHandler.on('TRANSLATE_BATCH', async (message: TranslateBatchMessage, _sen
         translatedText: c.translatedText,
       })),
       context: newContext,
+      usedFallback,
     });
   } catch (error) {
-    console.error('[Background] Batch translation failed:', error);
+    log.error('Batch translation failed', normalizeError(error));
     return {
       success: false,
       error: {
@@ -745,7 +828,7 @@ messageHandler.on('SAVE_TRANSLATION', async (message: SaveTranslationMessage, _s
   // Get provider from auth config (source of truth)
   const providerType = await getSelectedProvider();
   
-  console.log('[Background] Save translation requested:', {
+  log.debug('[Background] Save translation requested:', {
     videoId,
     platform,
     sourceLanguage,
@@ -758,6 +841,7 @@ messageHandler.on('SAVE_TRANSLATION', async (message: SaveTranslationMessage, _s
   try {
     // Save to cache
     await translationService.saveToCache(
+      platform,
       videoId,
       sourceLanguage,
       targetLanguage,
@@ -765,11 +849,11 @@ messageHandler.on('SAVE_TRANSLATION', async (message: SaveTranslationMessage, _s
       'default',
       subtitle
     );
-    
-    console.log('[Background] Translation saved to cache successfully');
+
+    log.debug('Translation saved to cache successfully');
     return successResponse({ saved: true });
   } catch (error) {
-    console.error('[Background] Failed to save translation:', error);
+    log.error('Failed to save translation', normalizeError(error));
     return successResponse({ saved: false });
   }
 });
@@ -778,19 +862,19 @@ messageHandler.on('SAVE_TRANSLATION', async (message: SaveTranslationMessage, _s
 messageHandler.on('GET_ALL_CACHED_TRANSLATIONS', async (message: GetAllCachedTranslationsMessage, _sender) => {
   const { platform, videoId } = message.payload;
   
-  console.log('[Background] Get all cached translations requested:', { platform, videoId });
+  log.debug('[Background] Get all cached translations requested:', { platform, videoId });
   
   try {
     const translations = await cacheManager.getAllCachedTranslationsForVideo(videoId);
     
-    console.log('[Background] Found cached translations:', {
+    log.debug('[Background] Found cached translations:', {
       videoId,
       count: translations.length,
     });
     
     return successResponse({ translations });
   } catch (error) {
-    console.error('[Background] Failed to get cached translations:', error);
+    log.error('Failed to get cached translations', normalizeError(error));
     return successResponse({ translations: [] });
   }
 });
@@ -799,13 +883,13 @@ messageHandler.on('GET_ALL_CACHED_TRANSLATIONS', async (message: GetAllCachedTra
 messageHandler.on('LOAD_CACHED_TRANSLATION', async (message: LoadCachedTranslationMessage, _sender) => {
   const { cacheId } = message.payload;
   
-  console.log('[Background] Load cached translation requested:', { cacheId });
+  log.debug('[Background] Load cached translation requested:', { cacheId });
   
   try {
     const result = await cacheManager.getByCacheId(cacheId);
     
     if (result.hit && result.subtitle) {
-      console.log('[Background] Loaded cached translation:', {
+      log.debug('[Background] Loaded cached translation:', {
         cacheId,
         cueCount: result.subtitle.cues?.length || 0,
       });
@@ -815,13 +899,13 @@ messageHandler.on('LOAD_CACHED_TRANSLATION', async (message: LoadCachedTranslati
       });
     }
     
-    console.log('[Background] Cached translation not found:', { cacheId });
+    log.debug('Cached translation not found', { cacheId });
     return successResponse({
       found: false,
       subtitle: undefined,
     });
   } catch (error) {
-    console.error('[Background] Failed to load cached translation:', error);
+    log.error('Failed to load cached translation', normalizeError(error));
     return successResponse({
       found: false,
       subtitle: undefined,
@@ -833,7 +917,7 @@ messageHandler.on('LOAD_CACHED_TRANSLATION', async (message: LoadCachedTranslati
 messageHandler.on('VALIDATE_OAUTH_TOKEN', async (message: ValidateOAuthTokenMessage, _sender) => {
   const { provider, accessToken } = message.payload;
 
-  console.log('[Background] OAuth token validation requested:', { provider });
+  log.debug('[Background] OAuth token validation requested:', { provider });
 
   try {
     if (provider === 'claude') {
@@ -842,7 +926,7 @@ messageHandler.on('VALIDATE_OAUTH_TOKEN', async (message: ValidateOAuthTokenMess
 
       // First check if token has the expected format (sk-ant-oat01-...)
       if (!accessToken.startsWith('sk-ant-oat01-')) {
-        console.warn('[Background] Claude token has invalid format');
+        log.warn('[Background] Claude token has invalid format');
         return successResponse({ valid: false, error: 'Invalid token format. Expected sk-ant-oat01-...' });
       }
 
@@ -857,7 +941,7 @@ messageHandler.on('VALIDATE_OAUTH_TOKEN', async (message: ValidateOAuthTokenMess
         }
         
         try {
-          console.log('[Background] Attempting token refresh...');
+          log.debug('[Background] Attempting token refresh...');
           const refreshResponse = await fetch('https://console.anthropic.com/v1/oauth/token', {
             method: 'POST',
             headers: {
@@ -888,15 +972,15 @@ messageHandler.on('VALIDATE_OAUTH_TOKEN', async (message: ValidateOAuthTokenMess
               expiresAt: newExpiresAt,
             });
 
-            console.log('[Background] Claude token refreshed successfully');
+            log.debug('[Background] Claude token refreshed successfully');
             return { valid: true };
           } else {
             const errorText = await refreshResponse.text();
-            console.warn('[Background] Token refresh failed:', refreshResponse.status, errorText);
+            log.warn('Token refresh failed', { status: refreshResponse.status, error: errorText });
             return { valid: false, error: 'Token expired and refresh failed' };
           }
         } catch (refreshError) {
-          console.error('[Background] Token refresh error:', refreshError);
+          log.error('Token refresh error', normalizeError(refreshError));
           return { valid: false, error: 'Token refresh failed' };
         }
       };
@@ -922,7 +1006,7 @@ messageHandler.on('VALIDATE_OAUTH_TOKEN', async (message: ValidateOAuthTokenMess
       // The provider will handle 401/403 retry with token refresh
 
       // Token format is valid and not expired (or expiration unknown)
-      console.log('[Background] Claude token format valid and not expired (or expiration unknown)');
+      log.debug('[Background] Claude token format valid and not expired (or expiration unknown)');
       return successResponse({ valid: true });
 
     } else if (provider === 'chatgpt') {
@@ -935,23 +1019,23 @@ messageHandler.on('VALIDATE_OAUTH_TOKEN', async (message: ValidateOAuthTokenMess
         },
       });
 
-      console.log('[Background] ChatGPT validation response status:', response.status);
+      log.debug('ChatGPT validation response', { status: response.status });
 
       // 200 = success
       if (response.ok) {
         const data = await response.json() as { email?: string; id?: string };
-        console.log('[Background] ChatGPT user:', data.email || data.id);
+        log.debug('ChatGPT user', { user: data.email || data.id });
         return successResponse({ valid: true });
       }
 
       const errorText = await response.text();
-      console.warn('[Background] ChatGPT validation failed:', response.status, errorText);
+      log.warn('ChatGPT validation failed', { status: response.status, error: errorText });
       return successResponse({ valid: false, error: errorText });
     }
 
     return successResponse({ valid: false, error: 'Unknown provider' });
   } catch (error) {
-    console.error('[Background] OAuth token validation error:', error);
+    log.error('OAuth token validation error', normalizeError(error));
     return successResponse({
       valid: false,
       error: error instanceof Error ? error.message : 'Validation failed',
@@ -967,11 +1051,11 @@ messageHandler.startListening();
 // ============================================================================
 
 self.addEventListener('install', () => {
-  console.log('[Background] Service Worker installed');
+  log.debug('[Background] Service Worker installed');
 });
 
 self.addEventListener('activate', () => {
-  console.log('[Background] Service Worker activated');
+  log.debug('[Background] Service Worker activated');
 });
 
 // ============================================================================

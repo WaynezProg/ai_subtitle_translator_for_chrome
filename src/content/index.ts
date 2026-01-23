@@ -38,11 +38,24 @@ import type { Platform, Cue, SubtitleFormat } from '../shared/types/subtitle';
 // import type { JobProgress } from '../shared/types/translation';
 import { parseWebVTT } from '../shared/parsers/webvtt-parser';
 import { parseTTML } from '../shared/parsers/ttml-parser';
+import { createLogger } from '../shared/utils/logger';
+
+const log = createLogger('Content');
+
+// Helper to normalize unknown errors for logging
+function normalizeError(error: unknown): Record<string, unknown> {
+  if (error instanceof Error) {
+    return { error: error.message, name: error.name };
+  }
+  return { error: String(error) };
+}
+
 import { parseJSON3 } from '../shared/parsers/json3-parser';
 import { createSubtitleRenderer, SubtitleRenderer } from './subtitle-renderer';
 import { getPreferencesFromBridge, getAuthConfigFromBridge } from './storage-bridge';
 import { downloadSubtitleAsSRT } from '../shared/utils/subtitle-download';
 import { parseSRT } from '../shared/parsers/srt-parser';
+import { detectSubtitleFormat, parseSubtitle as parseSubtitleByFormat } from '../shared/parsers';
 import type { SRTGenerationMode } from '../shared/utils/srt-generator';
 import type { SubtitleState, SubtitleOption } from './ui/settings-panel';
 
@@ -64,11 +77,14 @@ let initialized = false;
 const realtimeMode = true;  // Default to real-time mode
 let currentRenderOptions: RenderOptions = { ...DEFAULT_RENDER_OPTIONS };
 
+// Lock to prevent race conditions when starting translation
+let translationStartLock = false;
+
 // ============================================================================
 // Initialization
 // ============================================================================
 
-console.log('[Content] AI Subtitle Translator Content Script loaded');
+log.debug('[Content] AI Subtitle Translator Content Script loaded');
 
 /**
  * Initialize the content script
@@ -78,27 +94,27 @@ async function initialize(): Promise<void> {
   
   // Check if supported platform
   if (!isSupportedPlatform()) {
-    console.log('[Content] Not a supported platform');
+    log.debug('[Content] Not a supported platform');
     return;
   }
   
   const detection = detectPlatform();
   if (!detection.adapter || !detection.platform) {
-    console.log('[Content] No adapter available for this platform');
+    log.debug('[Content] No adapter available for this platform');
     return;
   }
   
   currentAdapter = detection.adapter;
   currentPlatform = detection.platform;
   
-  console.log(`[Content] Detected platform: ${currentPlatform}`);
+  log.debug(`[Content] Detected platform: ${currentPlatform}`);
   
   // Initialize adapter
   try {
     await currentAdapter.initialize();
-    console.log('[Content] Adapter initialized');
+    log.debug('[Content] Adapter initialized');
   } catch (error) {
-    console.error('[Content] Failed to initialize adapter:', error);
+    log.error('Failed to initialize adapter', normalizeError(error));
     return;
   }
   
@@ -110,26 +126,26 @@ async function initialize(): Promise<void> {
     setupMessageListener();
     setupBackgroundMessageHandlers();
   } catch (err) {
-    console.warn('[Content] Message listener setup failed (expected in MAIN world):', err);
+    log.warn('Message listener setup failed (expected in MAIN world)', normalizeError(err));
   }
   
   // Check for cached translation (non-blocking, may fail without chrome.runtime)
-  console.log('[Content] Calling checkForCachedTranslation...');
+  log.debug('[Content] Calling checkForCachedTranslation...');
   checkForCachedTranslation()
     .then(() => {
-      console.log('[Content] checkForCachedTranslation completed');
+      log.debug('[Content] checkForCachedTranslation completed');
     })
     .catch(err => {
       // Log all errors for debugging
       const errorMessage = err instanceof Error ? err.message : String(err);
-      console.warn('[Content] Cache check failed:', errorMessage);
+      log.warn('Cache check failed', { error: errorMessage });
     });
   
   // Setup network status monitoring (may fail without chrome.runtime)
   try {
     setupNetworkStatusMonitoring();
   } catch (err) {
-    console.warn('[Content] Network status monitoring failed:', err);
+    log.warn('Network status monitoring failed', normalizeError(err));
   }
   
   // Setup subtitle visibility listener
@@ -139,7 +155,7 @@ async function initialize(): Promise<void> {
   setupTimeOffsetKeyboardShortcuts();
   
   initialized = true;
-  console.log('[Content] Content script fully initialized');
+  log.debug('[Content] Content script fully initialized');
 }
 
 /**
@@ -151,12 +167,12 @@ function setupNetworkStatusMonitoring(): void {
   
   // Listen for network changes
   window.addEventListener('online', () => {
-    console.log('[Content] Network status: online');
+    log.debug('[Content] Network status: online');
     void updateLocalModeIndicator();
   });
   
   window.addEventListener('offline', () => {
-    console.log('[Content] Network status: offline');
+    log.debug('[Content] Network status: offline');
     showInfoToast('目前處於離線狀態');
     // Check if Ollama is available
     void checkOllamaFallback();
@@ -272,7 +288,7 @@ function waitForPlayerAndMountButton(): void {
 
           if (nowControlBarMounted || nowFloatingMounted) {
             observer.disconnect();
-            console.log('[Content] Button(s) mounted via observer');
+            log.debug('[Content] Button(s) mounted via observer');
           }
         });
 
@@ -304,7 +320,7 @@ function waitForPlayerAndMountButton(): void {
         }
       }
     } else {
-      console.log('[Content] Button(s) mounted immediately', {
+      log.debug('[Content] Button(s) mounted immediately', {
         controlBar: controlBarMounted,
         floating: floatingMounted,
       });
@@ -336,10 +352,10 @@ async function loadRenderOptions(): Promise<void> {
     if (stored) {
       const parsed = JSON.parse(stored) as Partial<RenderOptions>;
       currentRenderOptions = { ...DEFAULT_RENDER_OPTIONS, ...parsed };
-      console.log('[Content] Loaded render options:', currentRenderOptions);
+      log.debug('Loaded render options', { options: currentRenderOptions });
     }
   } catch (error) {
-    console.warn('[Content] Failed to load render options:', error);
+    log.warn('Failed to load render options', normalizeError(error));
   }
 }
 
@@ -349,9 +365,9 @@ async function loadRenderOptions(): Promise<void> {
 function saveRenderOptions(options: RenderOptions): void {
   try {
     localStorage.setItem(RENDER_OPTIONS_STORAGE_KEY, JSON.stringify(options));
-    console.log('[Content] Saved render options');
+    log.debug('[Content] Saved render options');
   } catch (error) {
-    console.warn('[Content] Failed to save render options:', error);
+    log.warn('Failed to save render options', normalizeError(error));
   }
 }
 
@@ -426,7 +442,7 @@ function handleSettingsClick(): void {
     if (container) {
       settingsPanel.mount(container);
     } else {
-      console.warn('[Content] Could not find container for settings panel');
+      log.warn('[Content] Could not find container for settings panel');
       return;
     }
     
@@ -466,7 +482,7 @@ async function loadCachedTranslationsForPanel(): Promise<void> {
       settingsPanel.updateCachedTranslations(result.translations);
     }
   } catch (error) {
-    console.warn('[Content] Failed to load cached translations:', error);
+    log.warn('Failed to load cached translations', normalizeError(error));
   }
 }
 
@@ -490,7 +506,7 @@ function handleSettingsChange(changes: Partial<RenderOptions>): void {
     subtitleRenderer.updateOptions(currentRenderOptions);
   }
   
-  console.log('[Content] Settings changed:', changes);
+  log.debug('[Content] Settings changed:', changes);
 }
 
 /**
@@ -528,7 +544,7 @@ async function handleCacheSelect(cacheId: string): Promise<void> {
       showErrorToast('API_ERROR', '載入快取翻譯失敗');
     }
   } catch (error) {
-    console.error('[Content] Failed to load cached translation:', error);
+    log.error('Failed to load cached translation', normalizeError(error));
     showErrorToast('API_ERROR', '載入快取翻譯時發生錯誤');
   }
 }
@@ -548,7 +564,7 @@ async function handleSettingsPanelUpload(file: File): Promise<void> {
     const content = await readFileAsText(file);
     await handleSubtitleUpload(content, file.name);
   } catch (error) {
-    console.error('[Content] Failed to read uploaded file:', error);
+    log.error('Failed to read uploaded file', normalizeError(error));
     showErrorToast('API_ERROR', '無法讀取上傳的檔案');
   }
 }
@@ -557,15 +573,16 @@ async function handleSettingsPanelUpload(file: File): Promise<void> {
  * Handle subtitle selection from settings panel
  */
 async function handleSubtitleSelect(subtitleId: string): Promise<void> {
-  console.log('[Content] Subtitle selected:', subtitleId);
+  log.debug('Subtitle selected', { subtitleId });
   
   // Check if it's a cached translation
   const videoId = currentAdapter?.getVideoId();
   if (!videoId || !currentPlatform) return;
-  
+
   try {
     // Try to load from cache
     const cached = await getCachedTranslation({
+      platform: currentPlatform,
       videoId,
       sourceLanguage: subtitleId.includes('uploaded') ? 'uploaded' : subtitleId,
       targetLanguage: 'zh-TW',
@@ -609,7 +626,7 @@ async function handleSubtitleSelect(subtitleId: string): Promise<void> {
       showSuccessToast(`已載入字幕: ${cached.subtitle.cues.length} 句`);
     }
   } catch (error) {
-    console.error('[Content] Failed to load subtitle:', error);
+    log.error('Failed to load subtitle', normalizeError(error));
     showErrorToast('API_ERROR', '載入字幕失敗');
   }
 }
@@ -640,6 +657,12 @@ function readFileAsText(file: File): Promise<string> {
  * Handle translate button click
  */
 async function handleTranslateClick(): Promise<void> {
+  // Prevent race conditions from rapid button clicks
+  if (translationStartLock) {
+    log.debug('[Content] Translation start already in progress, ignoring click');
+    return;
+  }
+
   if (!currentAdapter) {
     showErrorToast('AUTH_FAILED', '無法偵測到影片播放器');
     return;
@@ -667,7 +690,7 @@ async function handleTranslateClick(): Promise<void> {
   // Get user settings
   const preferences = await getPreferencesFromBridge();
   
-  console.log('[Content] Translation mode:', { realtimeMode });
+  log.debug('[Content] Translation mode:', { realtimeMode });
   
   // If real-time mode, start the real-time translator
   if (realtimeMode) {
@@ -675,7 +698,7 @@ async function handleTranslateClick(): Promise<void> {
     return;
   }
   
-  console.log('[Content] Using batch mode (realtimeMode is false)');
+  log.debug('[Content] Using batch mode (realtimeMode is false)');
   
   // Batch mode: Get subtitle tracks
   const tracks = await currentAdapter.getSubtitleTracks();
@@ -697,7 +720,7 @@ async function handleTranslateClick(): Promise<void> {
     const rawSubtitle = await currentAdapter.fetchSubtitle(track);
     
     // Debug: Log fetched content
-    console.log('[Content] Fetched subtitle:', {
+    log.debug('[Content] Fetched subtitle:', {
       format: rawSubtitle.format,
       contentLength: rawSubtitle.content.length,
       contentPreview: rawSubtitle.content.substring(0, 200),
@@ -735,10 +758,10 @@ async function handleTranslateClick(): Promise<void> {
     });
     
     currentJobId = result.jobId;
-    console.log(`[Content] Translation job started: ${currentJobId}`);
+    log.debug(`[Content] Translation job started: ${currentJobId}`);
     
   } catch (error) {
-    console.error('[Content] Translation failed:', error);
+    log.error('Translation failed', normalizeError(error));
     translateButton?.setState('error');
     floatingButton?.setState('error');
     progressOverlay?.hide();
@@ -755,11 +778,11 @@ let isPreTranslating = false;
  * Start real-time subtitle translation
  */
 async function startRealtimeTranslation(targetLanguage: string): Promise<void> {
-  console.log('[Content] startRealtimeTranslation called:', { targetLanguage });
-  
+  log.debug('[Content] startRealtimeTranslation called:', { targetLanguage });
+
   // If already translating in real-time, stop it
   if (realtimeTranslator?.getState() === 'active') {
-    console.log('[Content] Stopping real-time translation');
+    log.debug('[Content] Stopping real-time translation');
     realtimeTranslator.stop();
     translateButton?.setState('idle');
     floatingButton?.setState('idle');
@@ -768,7 +791,14 @@ async function startRealtimeTranslation(targetLanguage: string): Promise<void> {
     showInfoToast('即時翻譯已停止');
     return;
   }
-  
+
+  // Acquire lock to prevent race conditions
+  if (translationStartLock) {
+    log.debug('[Content] Translation start already in progress');
+    return;
+  }
+  translationStartLock = true;
+
   // Get source language from current track
   showInfoToast('正在偵測字幕...');
   const tracks = await currentAdapter!.getSubtitleTracks();
@@ -780,12 +810,13 @@ async function startRealtimeTranslation(targetLanguage: string): Promise<void> {
     } else {
       showInfoToast('此影片沒有可用的字幕');
     }
+    translationStartLock = false;  // Release lock
     return;
   }
   
   const sourceLanguage = track.language || 'auto';
   
-  console.log('[Content] Starting real-time translation:', { sourceLanguage, targetLanguage });
+  log.debug('[Content] Starting real-time translation:', { sourceLanguage, targetLanguage });
   
   // Update UI - no blocking overlay, just button state
   translateButton?.setState('translating');
@@ -802,7 +833,7 @@ async function startRealtimeTranslation(targetLanguage: string): Promise<void> {
     const actualSourceLanguage = (rawSubtitle.metadata?.language as string | undefined) || sourceLanguage;
     
     if (actualSourceLanguage !== sourceLanguage) {
-      console.log(`[Content] Using fallback source language: ${actualSourceLanguage} (requested: ${sourceLanguage})`);
+      log.debug(`[Content] Using fallback source language: ${actualSourceLanguage} (requested: ${sourceLanguage})`);
     }
     
     // Parse subtitle - pass isAutoGenerated to preserve ASR timing
@@ -812,23 +843,24 @@ async function startRealtimeTranslation(targetLanguage: string): Promise<void> {
       throw new Error('無法解析字幕內容');
     }
     
-    console.log(`[Content] Found ${cues.length} cues to translate (ASR: ${isAutoGenerated})`);
+    log.debug(`[Content] Found ${cues.length} cues to translate (ASR: ${isAutoGenerated})`);
     
     // Check for cached translation first
     const videoId = currentAdapter.getVideoId();
     let useCachedTranslation = false;
     
-    if (videoId) {
+    if (videoId && currentPlatform) {
       try {
         // Use track.language (sourceLanguage) for cache lookup to match how we save
         const cached = await getCachedTranslation({
+          platform: currentPlatform,
           videoId,
           sourceLanguage: sourceLanguage,  // Use track.language, not actualSourceLanguage
           targetLanguage,
         });
         
         if (cached.found && cached.subtitle?.cues?.length) {
-          console.log(`[Content] Found cached translation with ${cached.subtitle.cues.length} cues`);
+          log.debug(`[Content] Found cached translation with ${cached.subtitle.cues.length} cues`);
           
           // Use cached translations
           preTranslatedCuesWithTiming = cached.subtitle.cues.map(cue => ({
@@ -849,7 +881,7 @@ async function startRealtimeTranslation(targetLanguage: string): Promise<void> {
           showInfoToast('已載入快取的翻譯');
         }
       } catch (error) {
-        console.warn('[Content] Failed to check cache:', error);
+        log.warn('Failed to check cache', normalizeError(error));
       }
     }
     
@@ -867,7 +899,7 @@ async function startRealtimeTranslation(targetLanguage: string): Promise<void> {
     settingsPanel?.updateSubtitleState(getSubtitleState());
     
     // Create and start real-time translator
-    console.log('[Content] Starting realtime translator with', preTranslatedCuesWithTiming.length, 'cues', '(ASR:', isAutoGenerated, ')');
+    log.debug('Starting realtime translator', { cueCount: preTranslatedCuesWithTiming.length, isAutoGenerated });
     
     realtimeTranslator = createRealtimeTranslator({
       platform: currentPlatform!,
@@ -892,7 +924,7 @@ async function startRealtimeTranslation(targetLanguage: string): Promise<void> {
           });
           return result.translatedText;
         } catch (error) {
-          console.error('[Content] Real-time translation error:', error);
+          log.error('Real-time translation error', normalizeError(error));
           return text;
         }
       },
@@ -906,18 +938,23 @@ async function startRealtimeTranslation(targetLanguage: string): Promise<void> {
       translateButton?.setState('complete');
       floatingButton?.setState('complete');
       settingsPanel?.updateSubtitleState(getSubtitleState());
+      translationStartLock = false;  // Release lock
       return;
     }
-    
+
     // Otherwise, translate in background - don't block the UI
     // Pass trackLanguage for cache key consistency with checkForCachedTranslation
     void translateInBackground(cues, actualSourceLanguage, targetLanguage, sourceLanguage);
-    
+
+    // Release lock after starting background translation
+    translationStartLock = false;
+
   } catch (error) {
-    console.error('[Content] Translation setup failed:', error);
+    log.error('Translation setup failed', normalizeError(error));
     translateButton?.setState('error');
     floatingButton?.setState('error');
     showErrorToast('API_ERROR', error instanceof Error ? error.message : '翻譯準備失敗');
+    translationStartLock = false;  // Release lock on error
   }
 }
 
@@ -953,7 +990,7 @@ async function translateInBackground(
     const selectedProvider = authConfig?.selectedProvider || 'google-translate';
     const isAIProvider = selectedProvider !== 'google-translate';
     
-    console.log(`[Content] Translation provider: ${selectedProvider}, isAI: ${isAIProvider}`);
+    log.debug(`[Content] Translation provider: ${selectedProvider}, isAI: ${isAIProvider}`);
     
     // Group cues into batches for efficient translation
     const batchSize = 10;
@@ -976,7 +1013,7 @@ async function translateInBackground(
     // Use batch translation for speed - much faster than translating one by one
     // ========================================================================
     if (isAIProvider) {
-      console.log(`[Content] Phase 1: Quick Google Translate for ${cues.length} cues in ${batches.length} batches...`);
+      log.debug(`[Content] Phase 1: Quick Google Translate for ${cues.length} cues in ${batches.length} batches...`);
       showInfoToast('正在快速翻譯中...');
       
       let quickTranslatedCount = 0;
@@ -1022,12 +1059,12 @@ async function translateInBackground(
           translateButton?.setProgress(progress);
           floatingButton?.setProgress(progress);
         } catch (error) {
-          console.error('[Content] Quick translation batch error:', error);
+          log.error('Quick translation batch error', normalizeError(error));
           // Continue with next batch
         }
       }
       
-      console.log(`[Content] Phase 1 complete. ${quickTranslatedCount} cues quick-translated in ${completedBatches} batches.`);
+      log.debug(`[Content] Phase 1 complete. ${quickTranslatedCount} cues quick-translated in ${completedBatches} batches.`);
       showInfoToast('快速翻譯完成，正在進行 AI 精翻...');
     }
     
@@ -1036,7 +1073,7 @@ async function translateInBackground(
     // Use parallel processing to speed up - process PARALLEL_BATCH_COUNT batches at a time
     // ========================================================================
     const PARALLEL_BATCH_COUNT = 3; // Number of batches to process in parallel
-    console.log(`[Content] ${isAIProvider ? 'Phase 2: AI' : 'Translating'} ${batches.length} batches (${PARALLEL_BATCH_COUNT} parallel)...`);
+    log.debug(`[Content] ${isAIProvider ? 'Phase 2: AI' : 'Translating'} ${batches.length} batches (${PARALLEL_BATCH_COUNT} parallel)...`);
 
     let translatedCount = 0;
     let successfulBatches = 0;
@@ -1045,7 +1082,7 @@ async function translateInBackground(
     // Process batches in parallel groups
     for (let i = 0; i < batches.length; i += PARALLEL_BATCH_COUNT) {
       if (!realtimeTranslator || realtimeTranslator.getState() !== 'active') {
-        console.log('[Content] Translator stopped, aborting background translation');
+        log.debug('[Content] Translator stopped, aborting background translation');
         break;
       }
 
@@ -1098,7 +1135,7 @@ async function translateInBackground(
             }
           } else {
             failedBatches++;
-            console.error('[Content] Batch translation error:', result.reason);
+            log.error('[Content] Batch translation error:', result.reason);
           }
         }
 
@@ -1114,16 +1151,16 @@ async function translateInBackground(
         // Refresh display to show updated translations immediately
         realtimeTranslator?.refreshCurrentCue();
 
-        console.log(`[Content] ${isAIProvider ? 'AI' : 'Background'} translation progress: ${progress}% (${successfulBatches} successful, ${failedBatches} failed batches)`);
+        log.debug(`[Content] ${isAIProvider ? 'AI' : 'Background'} translation progress: ${progress}% (${successfulBatches} successful, ${failedBatches} failed batches)`);
 
       } catch (error) {
         failedBatches += batchGroup.length;
-        console.error('[Content] Batch group translation error:', error);
+        log.error('Batch group translation error', normalizeError(error));
         // Continue with next batch instead of stopping
       }
     }
     
-    console.log(`[Content] Background translation complete. Successful: ${successfulBatches}/${batches.length} batches, ${translatedCount}/${cues.length} cues translated`);
+    log.debug(`[Content] Background translation complete. Successful: ${successfulBatches}/${batches.length} batches, ${translatedCount}/${cues.length} cues translated`);
     
     // Only show success and save if we have successful translations
     if (translatedCount > 0) {
@@ -1134,11 +1171,11 @@ async function translateInBackground(
       showSuccessToast(`翻譯完成！共 ${translatedCount} 句`);
       
       if (failedBatches > 0) {
-        console.warn(`[Content] Some batches failed (${failedBatches}/${batches.length}), but ${translatedCount} cues were successfully translated`);
+        log.warn(`[Content] Some batches failed (${failedBatches}/${batches.length}), but ${translatedCount} cues were successfully translated`);
       }
     } else {
       // All translations failed
-      console.error('[Content] All translation batches failed');
+      log.error('[Content] All translation batches failed');
       translateButton?.setState('error');
       floatingButton?.setState('error');
       showErrorToast('API_ERROR', '翻譯失敗，請檢查網路連線或稍後再試');
@@ -1158,11 +1195,11 @@ async function translateInBackground(
     );
     
     if (validTranslatedCues.length === 0) {
-      console.warn('[Content] No valid translations to save, skipping cache save');
+      log.warn('[Content] No valid translations to save, skipping cache save');
       return;
     }
     
-    console.log('[Content] Saving translation with cache key:', {
+    log.debug('[Content] Saving translation with cache key:', {
       videoId,
       cacheSourceLang,
       cacheKeyLanguage,
@@ -1201,9 +1238,9 @@ async function translateInBackground(
             updatedAt: new Date().toISOString(),
           },
         });
-        console.log(`[Content] Translation saved to persistent cache (${validTranslatedCues.length}/${preTranslatedCuesWithTiming.length} cues translated)`);
+        log.debug(`[Content] Translation saved to persistent cache (${validTranslatedCues.length}/${preTranslatedCuesWithTiming.length} cues translated)`);
       } catch (error) {
-        console.warn('[Content] Failed to save translation to cache:', error);
+        log.warn('Failed to save translation to cache', normalizeError(error));
       }
     }
     
@@ -1258,7 +1295,7 @@ async function handleCancelClick(): Promise<void> {
     progressOverlay?.hide();
     showInfoToast('翻譯已取消');
   } catch (error) {
-    console.error('[Content] Failed to cancel:', error);
+    log.error('Failed to cancel', normalizeError(error));
   }
 }
 
@@ -1323,7 +1360,7 @@ function setupBackgroundMessageHandlers(): void {
     showSuccessToast(`翻譯完成！共 ${translatedCues.length} 句字幕`);
     settingsPanel?.updateSubtitleState(getSubtitleState());
     
-    console.log('[Content] Translation complete');
+    log.debug('[Content] Translation complete');
   });
   
   // Translation error
@@ -1360,7 +1397,7 @@ function parseSubtitle(content: string, format: SubtitleFormat, isAutoGenerated?
       // Pass isAutoGenerated to preserve ASR timing characteristics
       return parseJSON3(content, { isAutoGenerated }).cues;
     default:
-      console.warn(`[Content] Unknown subtitle format: ${format}`);
+      log.warn(`[Content] Unknown subtitle format: ${format}`);
       return [];
   }
 }
@@ -1376,13 +1413,13 @@ async function autoLoadCachedTranslation(
   targetLanguage: string
 ): Promise<boolean> {
   if (!currentAdapter || !currentPlatform) {
-    console.warn('[Content] Cannot auto-load: adapter or platform not initialized');
+    log.warn('[Content] Cannot auto-load: adapter or platform not initialized');
     return false;
   }
   
   const video = currentAdapter.getVideoElement();
   if (!video) {
-    console.warn('[Content] Cannot auto-load: video element not found');
+    log.warn('[Content] Cannot auto-load: video element not found');
     return false;
   }
   
@@ -1402,7 +1439,7 @@ async function autoLoadCachedTranslation(
       }
     }
     
-    console.log(`[Content] Auto-loading ${preTranslatedCuesWithTiming.length} cached cues`);
+    log.debug(`[Content] Auto-loading ${preTranslatedCuesWithTiming.length} cached cues`);
     
     // Create and start realtime translator with cached cues
     realtimeTranslator = createRealtimeTranslator({
@@ -1430,11 +1467,11 @@ async function autoLoadCachedTranslation(
     settingsPanel?.updateSubtitleState(getSubtitleState());
     
     showSuccessToast(`已自動載入翻譯 (${cachedCues.length} 句)`);
-    console.log('[Content] Auto-load cached translation complete');
+    log.debug('[Content] Auto-load cached translation complete');
     
     return true;
   } catch (error) {
-    console.error('[Content] Auto-load cached translation failed:', error);
+    log.error('Auto-load cached translation failed', normalizeError(error));
     return false;
   }
 }
@@ -1443,46 +1480,53 @@ async function autoLoadCachedTranslation(
  * Check for cached translation and auto-load if found
  */
 async function checkForCachedTranslation(): Promise<void> {
-  console.log('[Content] checkForCachedTranslation: Starting...');
+  log.debug('[Content] checkForCachedTranslation: Starting...');
   
   if (!currentAdapter) {
-    console.log('[Content] checkForCachedTranslation: No adapter');
+    log.debug('[Content] checkForCachedTranslation: No adapter');
     return;
   }
   
   const videoId = currentAdapter.getVideoId();
   if (!videoId) {
-    console.log('[Content] checkForCachedTranslation: No videoId');
+    log.debug('[Content] checkForCachedTranslation: No videoId');
     return;
   }
   
   const tracks = await currentAdapter.getSubtitleTracks();
   if (tracks.length === 0) {
-    console.log('[Content] checkForCachedTranslation: No tracks');
+    log.debug('[Content] checkForCachedTranslation: No tracks');
     return;
   }
   
   const track = tracks[0];
   const preferences = await getPreferencesFromBridge();
   
-  console.log('[Content] checkForCachedTranslation: Checking cache for', {
+  log.debug('[Content] checkForCachedTranslation: Checking cache for', {
+    platform: currentPlatform,
     videoId,
     sourceLanguage: track.language,
     targetLanguage: preferences.defaultTargetLanguage,
   });
-  
+
+  if (!currentPlatform) {
+    log.debug('[Content] checkForCachedTranslation: No platform detected, skipping cache check');
+    return;
+  }
+
   try {
     const cached = await getCachedTranslation({
+      platform: currentPlatform,
       videoId,
       sourceLanguage: track.language,
       targetLanguage: preferences.defaultTargetLanguage,
     });
     
-    console.log('[Content] checkForCachedTranslation: Result', { found: cached.found, hasCues: !!cached.subtitle?.cues?.length });
+    log.debug('[Content] checkForCachedTranslation: Result', { found: cached.found, hasCues: !!cached.subtitle?.cues?.length });
     
     if (cached.found && cached.subtitle?.cues?.length) {
       const cueCount = cached.subtitle.cues.length;
-      console.log(`[Content] Found cached translation with ${cueCount} cues, attempting auto-load...`);
+      log.debug(`[Content] Found cached translation with ${cueCount} cues, attempting auto-load...`);
       
       // Try to auto-load the cached translation
       const autoLoadSuccess = await autoLoadCachedTranslation(
@@ -1499,7 +1543,7 @@ async function checkForCachedTranslation(): Promise<void> {
       }
     }
   } catch (error) {
-    console.warn('[Content] checkForCachedTranslation: Error', error);
+    log.warn('checkForCachedTranslation error', normalizeError(error));
   }
 }
 
@@ -1566,7 +1610,7 @@ async function loadInitialVisibility(): Promise<void> {
     // Security: Use window.location.origin instead of '*' to restrict message receivers
     window.postMessage({ type: 'AI_SUBTITLE_GET_VISIBILITY' }, window.location.origin);
   } catch (error) {
-    console.error('[Content] Failed to load visibility state:', error);
+    log.error('Failed to load visibility state', normalizeError(error));
   }
 }
 
@@ -1576,7 +1620,7 @@ async function loadInitialVisibility(): Promise<void> {
 function setSubtitleVisibility(visible: boolean): void {
   if (subtitleRenderer) {
     subtitleRenderer.setVisible(visible);
-    console.log(`[Content] Subtitles ${visible ? 'shown' : 'hidden'}`);
+    log.debug(`[Content] Subtitles ${visible ? 'shown' : 'hidden'}`);
   }
 }
 
@@ -1626,11 +1670,11 @@ async function getSubtitleStateAsync(): Promise<SubtitleState> {
           }));
           
           cues = parsedCues;
-          console.log(`[Content] Fetched ${cues.length} cues on-demand for download`);
+          log.debug(`[Content] Fetched ${cues.length} cues on-demand for download`);
         }
       }
     } catch (error) {
-      console.warn('[Content] Failed to fetch subtitles on-demand:', error);
+      log.warn('Failed to fetch subtitles on-demand', normalizeError(error));
     }
   }
   
@@ -1645,7 +1689,7 @@ async function getSubtitleStateAsync(): Promise<SubtitleState> {
   const sourceLanguage = 'en';
   const targetLanguage = 'zh-TW';
   
-  console.log('[Content] getSubtitleStateAsync result:', {
+  log.debug('[Content] getSubtitleStateAsync result:', {
     hasOriginal,
     hasTranslation,
     cueCount: cues.length,
@@ -1767,23 +1811,57 @@ async function handleSubtitleDownload(mode: SRTGenerationMode): Promise<void> {
 
 /**
  * Handle subtitle upload from popup/settings
- * @param content - Raw SRT content
+ * @param content - Raw subtitle content (SRT, WebVTT, TTML, etc.)
  * @param filename - Original filename
  */
 async function handleSubtitleUpload(content: string, filename: string): Promise<void> {
-  console.log('[Content] Processing uploaded subtitle:', filename);
-  
+  log.debug('Processing uploaded subtitle', { filename });
+
   try {
-    // Parse the uploaded SRT content
-    const parseResult = parseSRT(content);
-    
-    if (parseResult.cues.length === 0) {
+    // Detect subtitle format from content or file extension
+    let format: SubtitleFormat | null = detectSubtitleFormat(content);
+
+    // Fallback to file extension if content detection fails
+    if (!format) {
+      const ext = filename.toLowerCase().split('.').pop();
+      switch (ext) {
+        case 'srt':
+          format = 'srt';
+          break;
+        case 'vtt':
+        case 'webvtt':
+          format = 'webvtt';
+          break;
+        case 'ttml':
+        case 'xml':
+        case 'dfxp':
+          format = 'ttml';
+          break;
+        case 'json':
+          format = 'json3';
+          break;
+        default:
+          // Default to SRT as most common format
+          format = 'srt';
+          log.warn('Unknown subtitle format, defaulting to SRT', { filename, ext });
+      }
+    }
+
+    log.debug('Detected subtitle format', { format, filename });
+
+    // Parse based on detected format
+    const cues = parseSubtitleByFormat(content, format);
+
+    if (cues.length === 0) {
       showErrorToast('API_ERROR', '無法解析上傳的字幕檔案');
       return;
     }
-    
-    console.log(`[Content] Parsed ${parseResult.cues.length} cues from uploaded file`);
-    console.log('[Content] First 3 parsed cues:', parseResult.cues.slice(0, 3));
+
+    // Create parseResult structure for compatibility
+    const parseResult = { cues };
+
+    log.debug('Parsed cues from uploaded file', { cueCount: parseResult.cues.length });
+    log.debug('First 3 parsed cues', { cues: parseResult.cues.slice(0, 3) });
     
     // Direct replace mode: Use uploaded subtitles directly with their own timing
     // This replaces any existing subtitles completely
@@ -1796,7 +1874,7 @@ async function handleSubtitleUpload(content: string, filename: string): Promise<
       translatedText: cue.text,
     }));
     
-    console.log('[Content] preTranslatedCuesWithTiming set:', {
+    log.debug('[Content] preTranslatedCuesWithTiming set:', {
       length: preTranslatedCuesWithTiming.length,
       firstCue: preTranslatedCuesWithTiming[0],
       hasTranslatedText: preTranslatedCuesWithTiming[0]?.translatedText ? 'yes' : 'no',
@@ -1828,7 +1906,7 @@ async function handleSubtitleUpload(content: string, filename: string): Promise<
     
     if (realtimeTranslator && realtimeTranslator.getState() === 'active') {
       // Update existing active translator
-      console.log('[Content] Updating existing realtime translator with uploaded subtitles');
+      log.debug('[Content] Updating existing realtime translator with uploaded subtitles');
       realtimeTranslator.updateTranslatedCues(preTranslatedCuesWithTiming);
       realtimeTranslator.refreshCurrentCue();
     } else if (platform) {
@@ -1839,7 +1917,7 @@ async function handleSubtitleUpload(content: string, filename: string): Promise<
       }
       
       // Create and start new realtime translator for uploaded subtitles
-      console.log('[Content] Starting realtime translator for uploaded subtitles');
+      log.debug('[Content] Starting realtime translator for uploaded subtitles');
       
       realtimeTranslator = createRealtimeTranslator({
         platform: platform,
@@ -1857,7 +1935,7 @@ async function handleSubtitleUpload(content: string, filename: string): Promise<
       
       realtimeTranslator.start();
     } else {
-      console.warn('[Content] Cannot start realtime translator: platform not detected');
+      log.warn('[Content] Cannot start realtime translator: platform not detected');
     }
     
     // Save uploaded subtitle to cache (associated with video)
@@ -1889,9 +1967,9 @@ async function handleSubtitleUpload(content: string, filename: string): Promise<
             updatedAt: new Date().toISOString(),
           },
         });
-        console.log('[Content] Uploaded subtitle saved to cache');
+        log.debug('[Content] Uploaded subtitle saved to cache');
       } catch (error) {
-        console.warn('[Content] Failed to save uploaded subtitle to cache:', error);
+        log.warn('Failed to save uploaded subtitle to cache', normalizeError(error));
       }
     }
     
@@ -1900,7 +1978,7 @@ async function handleSubtitleUpload(content: string, filename: string): Promise<
     floatingButton?.setState('complete');
     
     const state = getSubtitleState();
-    console.log('[Content] Subtitle state after upload:', {
+    log.debug('[Content] Subtitle state after upload:', {
       hasOriginal: state.hasOriginal,
       hasTranslation: state.hasTranslation,
       cueCount: state.cues?.length,
@@ -1914,7 +1992,7 @@ async function handleSubtitleUpload(content: string, filename: string): Promise<
     showSuccessToast(`已載入 ${parseResult.cues.length} 句字幕`);
     
   } catch (error) {
-    console.error('[Content] Upload processing failed:', error);
+    log.error('Upload processing failed', normalizeError(error));
     showErrorToast('API_ERROR', error instanceof Error ? error.message : '處理上傳檔案失敗');
   }
 }
@@ -1927,7 +2005,7 @@ async function handleSubtitleUpload(content: string, filename: string): Promise<
  * Handle SPA navigation
  */
 function handleNavigation(): void {
-  console.log('[Content] Navigation detected, cleaning up...');
+  log.debug('[Content] Navigation detected, cleaning up...');
   
   // Stop realtime translator first
   if (realtimeTranslator?.getState() === 'active') {
@@ -2037,7 +2115,7 @@ function setupTimeOffsetKeyboardShortcuts(): void {
     }
   });
   
-  console.log('[Content] Time offset keyboard shortcuts enabled (Shift + Arrow keys)');
+  log.debug('[Content] Time offset keyboard shortcuts enabled (Shift + Arrow keys)');
 }
 
 // ============================================================================

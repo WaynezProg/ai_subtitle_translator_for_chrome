@@ -104,18 +104,21 @@ export interface TranslationJob {
 
 /**
  * Cache key components per Constitution VII
- * Format: ${videoId}:${sourceLanguage}:${targetLanguage}:${providerModel}
+ * Format: ${platform}:${videoId}:${sourceLanguage}:${targetLanguage}:${providerModel}
  */
 export interface CacheKey {
+  /** Platform identifier (youtube, netflix, disney, prime) */
+  platform: string;
+
   /** Video identifier */
   videoId: string;
-  
+
   /** Source language */
   sourceLanguage: string;
-  
+
   /** Target language */
   targetLanguage: string;
-  
+
   /** Provider + Model (e.g., "claude:haiku-4.5") */
   providerModel: string;
 }
@@ -123,7 +126,7 @@ export interface CacheKey {
 /**
  * Serialized cache key format
  */
-export type SerializedCacheKey = `${string}:${string}:${string}:${string}`;
+export type SerializedCacheKey = `${string}:${string}:${string}:${string}:${string}`;
 
 /**
  * Translation cache entry
@@ -152,7 +155,7 @@ export interface TranslationCache {
  * Serialize cache key to string
  */
 export function serializeCacheKey(key: CacheKey): SerializedCacheKey {
-  return `${key.videoId}:${key.sourceLanguage}:${key.targetLanguage}:${key.providerModel}` as SerializedCacheKey;
+  return `${key.platform}:${key.videoId}:${key.sourceLanguage}:${key.targetLanguage}:${key.providerModel}` as SerializedCacheKey;
 }
 
 /**
@@ -160,17 +163,17 @@ export function serializeCacheKey(key: CacheKey): SerializedCacheKey {
  */
 export function parseCacheKey(serialized: string): CacheKey | null {
   const parts = serialized.split(':');
-  if (parts.length < 4) return null;
-  
+  if (parts.length < 5) return null;
+
   // Handle case where providerModel contains colons (e.g., "claude:haiku-4.5")
-  const [videoId, sourceLanguage, targetLanguage, ...providerParts] = parts;
+  const [platform, videoId, sourceLanguage, targetLanguage, ...providerParts] = parts;
   const providerModel = providerParts.join(':');
-  
-  if (!videoId || !sourceLanguage || !targetLanguage || !providerModel) {
+
+  if (!platform || !videoId || !sourceLanguage || !targetLanguage || !providerModel) {
     return null;
   }
-  
-  return { videoId, sourceLanguage, targetLanguage, providerModel };
+
+  return { platform, videoId, sourceLanguage, targetLanguage, providerModel };
 }
 
 /**

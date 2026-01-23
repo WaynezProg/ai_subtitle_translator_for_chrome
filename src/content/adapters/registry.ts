@@ -6,6 +6,9 @@
 
 import type { PlatformAdapter } from './types';
 import type { Platform } from '../../shared/types/subtitle';
+import { createLogger } from '../../shared/utils/logger';
+
+const log = createLogger('AdapterRegistry');
 
 /**
  * Registry for platform adapters
@@ -23,12 +26,12 @@ export class AdapterRegistry {
     // Check for duplicate platform
     const existing = this.adapters.find(a => a.platform === adapter.platform);
     if (existing) {
-      console.warn(`[AdapterRegistry] Replacing existing adapter for platform: ${adapter.platform}`);
+      log.warn(`Replacing existing adapter for platform: ${adapter.platform}`);
       this.adapters = this.adapters.filter(a => a.platform !== adapter.platform);
     }
-    
+
     this.adapters.push(adapter);
-    console.log(`[AdapterRegistry] Registered adapter for: ${adapter.platform}`);
+    log.debug(`Registered adapter for: ${adapter.platform}`);
   }
   
   /**
@@ -84,17 +87,17 @@ export class AdapterRegistry {
     const adapter = this.getAdapter(url);
     
     if (!adapter) {
-      console.log('[AdapterRegistry] No adapter found for URL:', url);
+      log.debug('No adapter found for URL:', { url });
       return null;
     }
-    
+
     try {
       await adapter.initialize();
       this.setCurrentAdapter(adapter);
-      console.log(`[AdapterRegistry] Initialized adapter: ${adapter.platform}`);
+      log.info(`Initialized adapter: ${adapter.platform}`);
       return adapter;
     } catch (error) {
-      console.error(`[AdapterRegistry] Failed to initialize adapter:`, error);
+      log.error(`Failed to initialize adapter`, error instanceof Error ? error : { error });
       return null;
     }
   }

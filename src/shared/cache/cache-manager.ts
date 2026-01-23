@@ -1,13 +1,13 @@
 /**
  * Cache Manager
- * 
+ *
  * Combines L1 (memory) and L2 (IndexedDB) caches for optimal performance.
- * 
+ *
  * Cache Strategy:
  * - Read: Check L1 first, then L2. Promote L2 hits to L1.
  * - Write: Write to both L1 and L2.
  * - Delete: Delete from both L1 and L2.
- * 
+ *
  * @see specs/001-ai-subtitle-translator/data-model.md
  * @see FR-014, FR-015: Cache Architecture
  */
@@ -19,6 +19,15 @@ import type { CachedTranslationInfo } from '../types/messages';
 import { L1MemoryCache, l1Cache, type CacheStats as L1CacheStats } from './l1-memory-cache';
 import { L2IndexedDBCache, l2Cache, type L2CacheStats } from './l2-indexeddb-cache';
 import { createCacheKey, serializeCacheKey } from './cache-utils';
+import { createLogger } from '../utils/logger';
+
+const log = createLogger('CacheManager');
+
+// Helper to normalize unknown errors for logging
+function normalizeError(error: unknown): Error | Record<string, unknown> {
+  if (error instanceof Error) return error;
+  return { error: String(error) };
+}
 
 // ============================================================================
 // Types
@@ -33,10 +42,10 @@ export interface CacheManagerStats {
 export interface CacheResult {
   /** Cached subtitle (null if not found) */
   subtitle: Subtitle | null;
-  
+
   /** Whether this was a cache hit */
   hit: boolean;
-  
+
   /** Which cache layer served the result */
   source: 'l1' | 'l2' | 'none';
 }
@@ -49,43 +58,43 @@ export class CacheManager {
   private l1: L1MemoryCache;
   private l2: L2IndexedDBCache;
   private initialized = false;
-  
+
   constructor(l1?: L1MemoryCache, l2?: L2IndexedDBCache) {
     this.l1 = l1 || l1Cache;
     this.l2 = l2 || l2Cache;
   }
-  
+
   /**
    * Initialize cache (mainly L2 IndexedDB)
    */
   async init(): Promise<void> {
     if (this.initialized) return;
-    
+
     try {
       await this.l2.init();
       this.initialized = true;
-      console.log('[CacheManager] Initialized');
-      
+      log.info('Initialized');
+
       // Run expired entry cleanup in background
-      this.cleanupExpired().catch(console.error);
+      this.cleanupExpired().catch((err) => log.error('Cleanup failed', normalizeError(err)));
     } catch (error) {
-      console.error('[CacheManager] Initialization failed:', error);
+      log.error('Initialization failed', normalizeError(error));
       // Continue without L2 - L1 will still work
       this.initialized = true;
     }
   }
-  
+
   // ============================================================================
   // Cache Operations
   // ============================================================================
-  
+
   /**
    * Get cached subtitle
    * Checks L1 first, then L2. Promotes L2 hits to L1.
    */
   async get(key: CacheKey): Promise<CacheResult> {
     await this.init();
-    
+
     // Check L1 first (fast path)
     const l1Result = this.l1.get(key);
     if (l1Result) {
@@ -95,7 +104,7 @@ export class CacheManager {
         source: 'l1',
       };
     }
-    
+
     // Check L2
     try {
       const l2Result = await this.l2.get(key);
@@ -109,82 +118,88 @@ export class CacheManager {
         };
       }
     } catch (error) {
-      console.error('[CacheManager] L2 get failed:', error);
+      log.error('L2 get failed', normalizeError(error));
     }
-    
+
     return {
       subtitle: null,
       hit: false,
       source: 'none',
     };
   }
-  
+
   /**
    * Get cached subtitle by components (convenience method)
    */
   async getByComponents(
+    platform: string,
     videoId: string,
     sourceLanguage: string,
     targetLanguage: string,
     provider: ProviderType,
     model?: string
   ): Promise<CacheResult> {
-    const key = createCacheKey(videoId, sourceLanguage, targetLanguage, provider, model);
+    const key = createCacheKey(platform, videoId, sourceLanguage, targetLanguage, provider, model);
     return this.get(key);
   }
-  
+
   /**
    * Check if key exists in cache
    */
   async has(key: CacheKey): Promise<boolean> {
     await this.init();
-    
+
     if (this.l1.has(key)) {
       return true;
     }
-    
+
     try {
       return await this.l2.has(key);
     } catch (error) {
-      console.error('[CacheManager] L2 has check failed:', error);
+      log.error('L2 has check failed', normalizeError(error));
       return false;
     }
   }
-  
+
   /**
    * Check if cache exists by components (convenience method)
    */
   async hasByComponents(
+    platform: string,
     videoId: string,
     sourceLanguage: string,
     targetLanguage: string,
     provider: ProviderType,
     model?: string
   ): Promise<boolean> {
-    const key = createCacheKey(videoId, sourceLanguage, targetLanguage, provider, model);
+    const key = createCacheKey(platform, videoId, sourceLanguage, targetLanguage, provider, model);
     return this.has(key);
   }
-  
+
   /**
    * Store subtitle in cache
    * Writes to both L1 and L2.
    */
   async set(key: CacheKey, subtitle: Subtitle): Promise<void> {
     await this.init();
-    
+
     // Write to L1 (synchronous)
     this.l1.set(key, subtitle);
-    
-    // Write to L2 (async, don't wait)
-    this.l2.set(key, subtitle).catch(error => {
-      console.error('[CacheManager] L2 set failed:', error);
-    });
+
+    // Write to L2 (async) - await to ensure data is persisted
+    // This prevents data loss if extension unloads before write completes
+    try {
+      await this.l2.set(key, subtitle);
+    } catch (error) {
+      log.error('L2 set failed', normalizeError(error));
+    }
   }
-  
+
   /**
    * Store subtitle by components (convenience method)
    */
   async setByComponents(
+    platform: string,
     videoId: string,
     sourceLanguage: string,
     targetLanguage: string,
@@ -192,124 +207,125 @@ export class CacheManager {
     model: string | undefined,
     subtitle: Subtitle
   ): Promise<void> {
-    const key = createCacheKey(videoId, sourceLanguage, targetLanguage, provider, model);
+    const key = createCacheKey(platform, videoId, sourceLanguage, targetLanguage, provider, model);
     return this.set(key, subtitle);
   }
-  
+
   /**
    * Delete entry from cache
    */
   async delete(key: CacheKey): Promise<boolean> {
     await this.init();
-    
+
     const l1Deleted = this.l1.delete(key);
-    
+
     let l2Deleted = false;
     try {
       l2Deleted = await this.l2.delete(key);
     } catch (error) {
-      console.error('[CacheManager] L2 delete failed:', error);
+      log.error('L2 delete failed', normalizeError(error));
     }
-    
+
     return l1Deleted || l2Deleted;
   }
-  
+
   /**
    * Delete all entries for a video
    */
   async deleteByVideoId(videoId: string): Promise<number> {
     await this.init();
-    
+
     const l1Deleted = this.l1.deleteByVideoId(videoId);
-    
+
     let l2Deleted = 0;
     try {
       l2Deleted = await this.l2.deleteByVideoId(videoId);
     } catch (error) {
-      console.error('[CacheManager] L2 deleteByVideoId failed:', error);
+      log.error('L2 deleteByVideoId failed', normalizeError(error));
     }
-    
-    return Math.max(l1Deleted, l2Deleted);
+
+    // Return the sum of deleted entries from both caches
+    return l1Deleted + l2Deleted;
   }
-  
+
   /**
    * Clear all cache entries
    */
   async clear(): Promise<void> {
     await this.init();
-    
+
     this.l1.clear();
-    
+
     try {
       await this.l2.clear();
     } catch (error) {
-      console.error('[CacheManager] L2 clear failed:', error);
+      log.error('L2 clear failed', normalizeError(error));
     }
   }
-  
+
   // ============================================================================
   // Query Operations
   // ============================================================================
-  
+
   /**
    * Get all cached entries (from L2, which is persistent)
    */
   async getAll(): Promise<TranslationCache[]> {
     await this.init();
-    
+
     try {
       return await this.l2.getAll();
     } catch (error) {
-      console.error('[CacheManager] L2 getAll failed:', error);
+      log.error('L2 getAll failed', normalizeError(error));
       return this.l1.getAll();
     }
   }
-  
+
   /**
    * Get all cache keys
    */
   async getKeys(): Promise<CacheKey[]> {
     await this.init();
-    
+
     try {
       return await this.l2.getKeys();
     } catch (error) {
-      console.error('[CacheManager] L2 getKeys failed:', error);
+      log.error('L2 getKeys failed', normalizeError(error));
       return this.l1.getKeys();
     }
   }
-  
+
   /**
    * Get entries for a specific video
    */
   async getByVideoId(videoId: string): Promise<TranslationCache[]> {
     await this.init();
-    
+
     try {
       return await this.l2.getByVideoId(videoId);
     } catch (error) {
-      console.error('[CacheManager] L2 getByVideoId failed:', error);
+      log.error('L2 getByVideoId failed', normalizeError(error));
       // Fallback to L1
       return this.l1.getAll().filter(entry => entry.key.videoId === videoId);
     }
   }
-  
+
   /**
    * Get all cached translations for a video as info objects (for UI display)
    * Returns simplified info about each cached translation without the full subtitle content
    */
   async getAllCachedTranslationsForVideo(videoId: string): Promise<CachedTranslationInfo[]> {
     await this.init();
-    
+
     try {
       const entries = await this.getByVideoId(videoId);
-      
+
       return entries.map(entry => {
         // Parse provider and model from providerModel field
         // Format is typically "provider:model" or just "provider"
         const [provider, ...modelParts] = entry.key.providerModel.split(':');
         const model = modelParts.length > 0 ? modelParts.join(':') : undefined;
-        
+
         return {
           id: serializeCacheKey(entry.key),
           sourceLanguage: entry.key.sourceLanguage,
@@ -319,63 +335,64 @@ export class CacheManager {
           translatedAt: entry.createdAt,
           cueCount: entry.subtitle.cues?.length || 0,
         };
-      }).sort((a, b) => 
+      }).sort((a, b) =>
         // Sort by most recent first
         new Date(b.translatedAt).getTime() - new Date(a.translatedAt).getTime()
       );
     } catch (error) {
-      console.error('[CacheManager] getAllCachedTranslationsForVideo failed:', error);
+      log.error('getAllCachedTranslationsForVideo failed', normalizeError(error));
       return [];
     }
   }
-  
+
   /**
    * Get a cached translation by its serialized cache ID
    */
   async getByCacheId(cacheId: string): Promise<CacheResult> {
     await this.init();
-    
+
     try {
       // Parse the cache ID back to a key
       const parts = cacheId.split(':');
-      if (parts.length < 4) {
+      if (parts.length < 5) {
         return { subtitle: null, hit: false, source: 'none' };
       }
-      
-      const [videoId, sourceLanguage, targetLanguage, ...providerParts] = parts;
+
+      const [platform, videoId, sourceLanguage, targetLanguage, ...providerParts] = parts;
       const providerModel = providerParts.join(':');
-      
+
       const key: CacheKey = {
+        platform,
         videoId,
         sourceLanguage,
         targetLanguage,
         providerModel,
       };
-      
+
       return this.get(key);
     } catch (error) {
-      console.error('[CacheManager] getByCacheId failed:', error);
+      log.error('getByCacheId failed', normalizeError(error));
       return { subtitle: null, hit: false, source: 'none' };
     }
   }
-  
+
   // ============================================================================
   // Statistics
   // ============================================================================
-  
+
   /**
    * Get cache statistics
    */
   async getStats(): Promise<CacheManagerStats> {
     await this.init();
-    
+
     const l1Stats = this.l1.getStats();
-    
+
     let l2Stats: L2CacheStats;
     try {
       l2Stats = await this.l2.getStats();
     } catch (error) {
-      console.error('[CacheManager] L2 getStats failed:', error);
+      log.error('L2 getStats failed', normalizeError(error));
       l2Stats = {
         count: 0,
         totalSize: 0,
@@ -383,23 +400,23 @@ export class CacheManager {
         storeName: 'unknown',
       };
     }
-    
+
     // Combined hit rate calculation
     // L1 hits are the primary indicator, L2 hits are secondary
     const totalRequests = l1Stats.hits + l1Stats.misses;
     const combinedHitRate = totalRequests > 0 ? l1Stats.hitRate : 0;
-    
+
     return {
       l1: l1Stats,
       l2: l2Stats,
       combinedHitRate,
     };
   }
-  
+
   // ============================================================================
   // Maintenance
   // ============================================================================
-  
+
   /**
    * Cleanup expired entries
    */
@@ -407,37 +424,37 @@ export class CacheManager {
     try {
       const evicted = await this.l2.evictExpired();
       if (evicted > 0) {
-        console.log(`[CacheManager] Cleaned up ${evicted} expired entries`);
+        log.info(`Cleaned up ${evicted} expired entries`);
       }
     } catch (error) {
-      console.error('[CacheManager] Expired cleanup failed:', error);
+      log.error('Expired cleanup failed', normalizeError(error));
     }
   }
-  
+
   /**
    * Warm L1 cache from L2 (optional optimization)
    */
   async warmL1FromL2(videoId?: string): Promise<void> {
     await this.init();
-    
+
     try {
-      const entries = videoId 
+      const entries = videoId
         ? await this.l2.getByVideoId(videoId)
         : await this.l2.getAll();
-      
+
       // Load most recent entries into L1
-      const sorted = entries.sort((a, b) => 
+      const sorted = entries.sort((a, b) =>
         new Date(b.lastAccessedAt).getTime() - new Date(a.lastAccessedAt).getTime()
       );
-      
+
       // Load up to L1 capacity
       for (const entry of sorted.slice(0, this.l1.size)) {
         this.l1.set(entry.key, entry.subtitle);
       }
-      
-      console.log(`[CacheManager] Warmed L1 with ${Math.min(sorted.length, this.l1.size)} entries`);
+
+      log.info(`Warmed L1 with ${Math.min(sorted.length, this.l1.size)} entries`);
     } catch (error) {
-      console.error('[CacheManager] L1 warm failed:', error);
+      log.error('L1 warm failed', normalizeError(error));
     }
   }
 }

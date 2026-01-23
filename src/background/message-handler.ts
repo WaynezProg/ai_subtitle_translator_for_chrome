@@ -1,10 +1,14 @@
 /**
  * Background Message Handler
- * 
+ *
  * Handles incoming messages from content scripts and popup.
- * 
+ *
  * @see specs/001-ai-subtitle-translator/contracts/message-passing.md
  */
+
+import { createLogger } from '../shared/utils/logger';
+
+const log = createLogger('MessageHandler');
 
 import type {
   ContentToBackgroundMessage,
@@ -101,7 +105,7 @@ export class MessageHandler {
     
     chrome.runtime.onMessage.addListener(this.handleMessage);
     this.isListening = true;
-    console.log('[MessageHandler] Started listening for messages');
+    log.debug('Started listening for messages');
   }
   
   /**
@@ -114,7 +118,7 @@ export class MessageHandler {
     
     chrome.runtime.onMessage.removeListener(this.handleMessage);
     this.isListening = false;
-    console.log('[MessageHandler] Stopped listening for messages');
+    log.debug('Stopped listening for messages');
   }
   
   /**

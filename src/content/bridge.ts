@@ -1,13 +1,26 @@
 /**
  * Content Script Bridge
- * 
+ *
  * This script runs in the ISOLATED world and bridges messages between
  * the popup/background (via chrome.runtime) and the main content script
  * (via window.postMessage).
- * 
+ *
  * Required because the main content script runs in MAIN world for
  * XHR/fetch interception and doesn't have access to chrome.runtime.
  */
+
+// Simple logging that works in isolated world (can't use shared logger due to isolation)
+const bridgeLog = {
+  debug: (msg: string): void => {
+    if (typeof console !== 'undefined') console.debug(`[Bridge] ${msg}`);
+  },
+  warn: (msg: string, error?: unknown): void => {
+    if (typeof console !== 'undefined') console.warn(`[Bridge] ${msg}`, error || '');
+  },
+  error: (msg: string, error?: unknown): void => {
+    if (typeof console !== 'undefined') console.error(`[Bridge] ${msg}`, error || '');
+  },
+};
 
 /**
  * Check if extension context is still valid
@@ -132,7 +145,7 @@ window.addEventListener('message', (event) => {
           visible
         }, window.location.origin);
       } catch (error) {
-        console.error('[Bridge] Failed to get visibility:', error);
+        bridgeLog.error(' Failed to get visibility:', error);
       }
     })();
     return;
@@ -169,7 +182,7 @@ window.addEventListener('message', (event) => {
         data: result
       }, window.location.origin);
     }).catch((error: unknown) => {
-      console.error('[Bridge] Failed to get storage:', error);
+      bridgeLog.error(' Failed to get storage:', error);
       window.postMessage({
         type: 'AI_SUBTITLE_STORAGE_RESPONSE',
         requestId,
@@ -211,7 +224,7 @@ window.addEventListener('message', (event) => {
         success: true
       }, window.location.origin);
     }).catch((error: unknown) => {
-      console.error('[Bridge] Failed to set storage:', error);
+      bridgeLog.error(' Failed to set storage:', error);
       window.postMessage({
         type: 'AI_SUBTITLE_STORAGE_RESPONSE',
         requestId,
@@ -258,4 +271,4 @@ window.addEventListener('message', (event) => {
   }
 });
 
-console.log('[Bridge] Content script bridge loaded');
+bridgeLog.debug(' Content script bridge loaded');

@@ -163,6 +163,7 @@ export async function cancelTranslation(jobId: string): Promise<{ cancelled: boo
  * Get cached translation if available
  */
 export async function getCachedTranslation(params: {
+  platform: string;
   videoId: string;
   sourceLanguage: string;
   targetLanguage: string;
@@ -172,7 +173,7 @@ export async function getCachedTranslation(params: {
     payload: params,
     requestId: generateRequestId(),
   };
-  
+
   const response = await sendMessage<GetCachedTranslationResponse>(message);
   return response.data!;
 }

@@ -19,6 +19,9 @@ import type {
   VideoEventCallback,
 } from './types';
 import { AdapterError, DEFAULT_RENDER_OPTIONS } from './types';
+import { createLogger } from '../../shared/utils/logger';
+
+const log = createLogger('DisneyAdapter');
 
 // ============================================================================
 // Types
@@ -61,6 +64,7 @@ export class DisneyAdapter implements PlatformAdapter {
   private currentCues: Cue[] = [];
   private originalFetch: typeof window.fetch | null = null;
   private initialized = false;
+  private videoObserver: MutationObserver | null = null;
   
   // ============================================================================
   // Public Methods
@@ -73,7 +77,7 @@ export class DisneyAdapter implements PlatformAdapter {
   async initialize(): Promise<void> {
     if (this.initialized) return;
     
-    console.log('[DisneyAdapter] Initializing...');
+    log.info('Initializing...');
     
     // Setup fetch hook to intercept subtitle requests
     this.setupFetchHook();
@@ -82,7 +86,7 @@ export class DisneyAdapter implements PlatformAdapter {
     await this.waitForVideoElement();
     
     this.initialized = true;
-    console.log('[DisneyAdapter] Initialized');
+    log.info('Initialized');
   }
   
   getVideoId(): string | null {
@@ -97,7 +101,7 @@ export class DisneyAdapter implements PlatformAdapter {
   }
   
   async fetchSubtitle(track: SubtitleTrack): Promise<RawSubtitle> {
-    console.log('[DisneyAdapter] Fetching subtitle:', track.id);
+    log.debug('Fetching subtitle', { trackId: track.id });
     
     try {
       const response = await fetch(track.url, {
@@ -137,7 +141,7 @@ export class DisneyAdapter implements PlatformAdapter {
     this.currentCues = cues;
     this.createOrUpdateOverlay(options);
     this.setupTimeSync();
-    console.log('[DisneyAdapter] Injected', cues.length, 'cues');
+    log.debug('Injected cues', { count: cues.length });
   }
   
   removeSubtitles(): void {
@@ -186,23 +190,29 @@ export class DisneyAdapter implements PlatformAdapter {
   }
   
   destroy(): void {
-    console.log('[DisneyAdapter] Destroying...');
-    
+    log.info('Destroying...');
+
+    // Disconnect video observer if still active
+    if (this.videoObserver) {
+      this.videoObserver.disconnect();
+      this.videoObserver = null;
+    }
+
     // Restore original fetch
     if (this.originalFetch) {
       window.fetch = this.originalFetch;
       this.originalFetch = null;
     }
-    
+
     // Cleanup event listeners
     for (const cleanup of this.eventListeners.values()) {
       cleanup();
     }
     this.eventListeners.clear();
-    
+
     // Remove overlay
     this.removeSubtitles();
-    
+
     this.initialized = false;
   }
   
@@ -216,24 +226,32 @@ export class DisneyAdapter implements PlatformAdapter {
   private setupFetchHook(): void {
     this.originalFetch = window.fetch;
     const self = this;
-    
+
     window.fetch = async function(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+      // Safety check: if originalFetch is gone, try to use the current window.fetch
+      const fetchFn = self.originalFetch || window.fetch;
+
       let url: string;
-      if (typeof input === 'string') {
-        url = input;
-      } else if (input instanceof URL) {
-        url = input.toString();
-      } else if (input instanceof Request) {
-        url = input.url;
-      } else {
-        // Fallback for unexpected types
-        url = String(input);
+      try {
+        if (typeof input === 'string') {
+          url = input;
+        } else if (input instanceof URL) {
+          url = input.toString();
+        } else if (input instanceof Request) {
+          url = input.url;
+        } else {
+          // Fallback for unexpected types
+          url = String(input);
+        }
+      } catch {
+        // If URL extraction fails, just pass through to original fetch
+        return fetchFn.call(window, input, init);
       }
-      
+
       // Clone the response for inspection
-      const response = await self.originalFetch!.call(window, input, init);
-      
-      // Check for playback/manifest endpoints
+      const response = await fetchFn.call(window, input, init);
+
+      // Check for playback/manifest endpoints (wrap in try-catch)
       if (self.isPlaybackUrl(url)) {
         try {
           const clonedResponse = response.clone();
@@ -243,16 +261,20 @@ export class DisneyAdapter implements PlatformAdapter {
           // Ignore parse errors
         }
       }
-      
-      // Capture direct subtitle URLs
-      if (self.isSubtitleUrl(url)) {
-        self.captureSubtitleUrl(url);
+
+      // Capture direct subtitle URLs (wrap in try-catch)
+      try {
+        if (self.isSubtitleUrl(url)) {
+          self.captureSubtitleUrl(url);
+        }
+      } catch (error) {
+        log.warn('Failed to capture subtitle URL', { error: String(error) });
       }
-      
+
       return response;
     };
-    
-    console.log('[DisneyAdapter] Fetch hook installed');
+
+    log.debug('Fetch hook installed');
   }
   
   /**
@@ -305,7 +327,7 @@ export class DisneyAdapter implements PlatformAdapter {
       });
     }
     
-    console.log('[DisneyAdapter] Extracted', this.subtitleTracks.length, 'subtitle tracks');
+    log.debug('Extracted subtitle tracks', { count: this.subtitleTracks.length });
   }
   
   /**
@@ -341,9 +363,9 @@ export class DisneyAdapter implements PlatformAdapter {
         isDefault: this.subtitleTracks.length === 0,
       });
       
-      console.log('[DisneyAdapter] Captured subtitle URL:', language);
+      log.debug('Captured subtitle URL', { language });
     } catch (error) {
-      console.warn('[DisneyAdapter] Failed to parse subtitle URL:', error);
+      log.warn('Failed to parse subtitle URL', error instanceof Error ? { error: error.message } : { error });
     }
   }
   
@@ -387,22 +409,24 @@ export class DisneyAdapter implements PlatformAdapter {
         return;
       }
 
-      const observer = new MutationObserver(() => {
+      // Store observer reference for cleanup
+      this.videoObserver = new MutationObserver(() => {
         const video = document.querySelector('video');
         if (video) {
           this.videoElement = video;
-          observer.disconnect();
+          this.videoObserver?.disconnect();
+          this.videoObserver = null;
           resolve(video);
         }
       });
 
       const startObserving = (): void => {
-        if (document.body) {
-          observer.observe(document.body, {
+        if (document.body && this.videoObserver) {
+          this.videoObserver.observe(document.body, {
             childList: true,
             subtree: true,
           });
-        } else {
+        } else if (this.videoObserver) {
           setTimeout(startObserving, 10);
         }
       };
@@ -415,7 +439,8 @@ export class DisneyAdapter implements PlatformAdapter {
 
       // Timeout after 30 seconds
       setTimeout(() => {
-        observer.disconnect();
+        this.videoObserver?.disconnect();
+        this.videoObserver = null;
         const video = document.querySelector('video');
         if (video) {
           this.videoElement = video;

@@ -28,6 +28,15 @@ import { TRANSLATION_CONFIG } from '../shared/utils/constants';
 import { generateId, retry } from '../shared/utils/helpers';
 import { sendToTab } from './message-handler';
 import { cacheManager, createCacheKey, type CacheResult } from '../shared/cache';
+import { createLogger } from '../shared/utils/logger';
+
+const log = createLogger('TranslationService');
+
+// Helper to normalize unknown errors for logging
+function normalizeError(error: unknown): Error | Record<string, unknown> {
+  if (error instanceof Error) return error;
+  return { error: String(error) };
+}
 
 // ============================================================================
 // Types
@@ -122,49 +131,90 @@ export interface TranslationJobState {
 
 export class TranslationService {
   private activeJobs: Map<string, TranslationJobState> = new Map();
+  // Track pending requests by video+language key to prevent duplicate requests
+  private pendingRequests: Map<string, Promise<string>> = new Map();
   
   /**
    * Check cache for existing translation
    */
   async checkCache(
+    platform: string,
     videoId: string,
     sourceLanguage: string,
     targetLanguage: string,
     provider: ProviderType,
     model?: string
   ): Promise<CacheResult> {
-    const key = createCacheKey(videoId, sourceLanguage, targetLanguage, provider, model);
+    const key = createCacheKey(platform, videoId, sourceLanguage, targetLanguage, provider, model);
     return cacheManager.get(key);
   }
-  
+
   /**
    * Get cached translation if available
    */
   async getCachedTranslation(
+    platform: string,
     videoId: string,
     sourceLanguage: string,
     targetLanguage: string,
     provider: ProviderType,
     model?: string
   ): Promise<Subtitle | null> {
-    const result = await this.checkCache(videoId, sourceLanguage, targetLanguage, provider, model);
+    const result = await this.checkCache(platform, videoId, sourceLanguage, targetLanguage, provider, model);
     return result.subtitle;
   }
   
   /**
+   * Generate a deduplication key for a translation request
+   * Includes platform to prevent conflicts between same video IDs on different platforms
+   */
+  private getDeduplicationKey(platform: string, videoId: string, sourceLanguage: string, targetLanguage: string): string {
+    return `${platform}:${videoId}:${sourceLanguage}:${targetLanguage}`;
+  }
+
+  /**
    * Start a new translation job
    */
   async startTranslation(request: TranslationJobRequest): Promise<string> {
-    // Check for existing job
+    // Check for existing job by subtitle ID
     const existingJob = this.findExistingJob(request.subtitleId);
     if (existingJob) {
-      console.log(`[TranslationService] Job already exists for ${request.subtitleId}`);
+      log.debug('Job already exists for subtitle', { subtitleId: request.subtitleId });
       return existingJob.id;
     }
+
+    // Check for pending request with same platform+video+language combination (race condition prevention)
+    const dedupeKey = this.getDeduplicationKey(request.platform, request.videoId, request.sourceLanguage, request.targetLanguage);
+    const pendingRequest = this.pendingRequests.get(dedupeKey);
+    if (pendingRequest) {
+      log.debug('Returning pending request for same video+language', { dedupeKey });
+      return pendingRequest;
+    }
+
+    // Create the job promise and store it for deduplication
+    const jobPromise = this.doStartTranslation(request);
+    this.pendingRequests.set(dedupeKey, jobPromise);
+
+    try {
+      const jobId = await jobPromise;
+      return jobId;
+    } finally {
+      // Clean up pending request after a short delay to handle rapid duplicate calls
+      setTimeout(() => {
+        this.pendingRequests.delete(dedupeKey);
+      }, 1000);
+    }
+  }
+
+  /**
+   * Internal method to actually start the translation job
+   */
+  private async doStartTranslation(request: TranslationJobRequest): Promise<string> {
     
     // Check cache first
     const model = this.getModelForProvider(request.provider.type);
     const cacheResult = await this.checkCache(
+      request.platform,
       request.videoId,
       request.sourceLanguage,
       request.targetLanguage,
@@ -173,7 +223,7 @@ export class TranslationService {
     );
     
     if (cacheResult.hit && cacheResult.subtitle) {
-      console.log(`[TranslationService] Cache hit (${cacheResult.source}) for ${request.videoId}`);
+      log.debug(`[TranslationService] Cache hit (${cacheResult.source}) for ${request.videoId}`);
       
       // Send cached result immediately
       const jobId = generateId();
@@ -231,7 +281,7 @@ export class TranslationService {
     
     // Start translation asynchronously
     this.executeTranslation(jobId, request, provider, chunks).catch((error) => {
-      console.error(`[TranslationService] Job ${jobId} failed:`, error);
+      log.error(`Job ${jobId} failed`, normalizeError(error));
     });
     
     return jobId;
@@ -324,7 +374,7 @@ export class TranslationService {
       for (let i = 0; i < chunks.length; i++) {
         // Check for cancellation
         if (job.abortController.signal.aborted) {
-          console.log(`[TranslationService] Job ${jobId} was cancelled`);
+          log.debug(`[TranslationService] Job ${jobId} was cancelled`);
           return;
         }
         
@@ -332,7 +382,7 @@ export class TranslationService {
         job.currentChunk = i;
         job.progress.currentChunk = i;
         
-        console.log(`[TranslationService] Translating chunk ${i + 1}/${chunks.length} (${chunk.length} cues)`);
+        log.debug(`[TranslationService] Translating chunk ${i + 1}/${chunks.length} (${chunk.length} cues)`);
         
         // Translate chunk with retry
         const result = await this.translateChunkWithRetry(
@@ -411,6 +461,7 @@ export class TranslationService {
       // Store in cache for future use
       const model = this.getModelForProvider(request.provider.type);
       await this.saveToCache(
+        request.platform,
         request.videoId,
         request.sourceLanguage,
         request.targetLanguage,
@@ -422,7 +473,7 @@ export class TranslationService {
       // Send completion message
       await this.sendTranslationComplete(job, subtitle);
       
-      console.log(`[TranslationService] Job ${jobId} completed successfully`);
+      log.debug(`[TranslationService] Job ${jobId} completed successfully`);
       
     } catch (error) {
       job.status = 'failed';
@@ -434,8 +485,8 @@ export class TranslationService {
       job.updatedAt = new Date().toISOString();
       
       await this.sendTranslationError(job);
-      
-      console.error(`[TranslationService] Job ${jobId} failed:`, error);
+
+      log.error(`Job ${jobId} failed`, normalizeError(error));
     } finally {
       // Clean up job after some time
       setTimeout(() => {
@@ -560,6 +611,7 @@ export class TranslationService {
    * Save translation to cache
    */
   async saveToCache(
+    platform: string,
     videoId: string,
     sourceLanguage: string,
     targetLanguage: string,
@@ -568,12 +620,12 @@ export class TranslationService {
     subtitle: Subtitle
   ): Promise<void> {
     try {
-      const key = createCacheKey(videoId, sourceLanguage, targetLanguage, provider, model);
+      const key = createCacheKey(platform, videoId, sourceLanguage, targetLanguage, provider, model);
       await cacheManager.set(key, subtitle);
-      console.log(`[TranslationService] Saved to cache: ${videoId}`);
+      log.debug(`Saved to cache: ${platform}:${videoId}`);
     } catch (error) {
       // Cache errors should not fail the translation
-      console.error('[TranslationService] Failed to save to cache:', error);
+      log.error('Failed to save to cache', normalizeError(error));
     }
   }
   
