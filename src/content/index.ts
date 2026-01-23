@@ -892,6 +892,7 @@ async function startRealtimeTranslation(targetLanguage: string): Promise<void> {
     }
     
     // If no cache, initialize with original cues (translations will be filled in progressively)
+    // The cues array should already be in order by startTime from the parser
     if (!useCachedTranslation) {
       preTranslatedCuesWithTiming = cues.map(cue => ({
         startTime: cue.startTime,
@@ -965,14 +966,90 @@ async function startRealtimeTranslation(targetLanguage: string): Promise<void> {
 }
 
 /**
+ * Find the cue index closest to the current video playback position
+ * This helps prioritize translating cues near what the user is watching
+ * Returns the cue.index value, which should match the array position for properly indexed cues
+ */
+function findCurrentCueIndex(cues: Cue[]): number {
+  const video = currentAdapter?.getVideoElement();
+  if (!video || cues.length === 0) return 0;
+
+  const currentTimeMs = video.currentTime * 1000;
+
+  // Binary search for the cue closest to current time
+  let left = 0;
+  let right = cues.length - 1;
+
+  while (left < right) {
+    const mid = Math.floor((left + right) / 2);
+    if (cues[mid].startTime < currentTimeMs) {
+      left = mid + 1;
+    } else {
+      right = mid;
+    }
+  }
+
+  // Clamp to valid array position and return the cue.index at that position
+  const arrayPos = Math.max(0, Math.min(left, cues.length - 1));
+  return cues[arrayPos].index;
+}
+
+/**
+ * Order batches by priority: start from current playback position, then expand outward
+ * This ensures the user sees translations for what they're currently watching first
+ */
+function orderBatchesByPriority<T extends { cueIndices: number[] }>(batches: T[], currentCueIndex: number, batchSize: number): T[] {
+  if (batches.length === 0) return batches;
+
+  // Find which batch contains the current cue
+  const currentBatchIndex = Math.floor(currentCueIndex / batchSize);
+
+  // Create priority-ordered list: current batch first, then alternating forward/backward
+  const orderedBatches: T[] = [];
+  const visited = new Set<number>();
+
+  // Start with the current batch
+  if (currentBatchIndex < batches.length) {
+    orderedBatches.push(batches[currentBatchIndex]);
+    visited.add(currentBatchIndex);
+  }
+
+  // Expand outward: alternate between forward and backward batches
+  let offset = 1;
+  while (orderedBatches.length < batches.length) {
+    // Forward batch (after current)
+    const forwardIndex = currentBatchIndex + offset;
+    if (forwardIndex < batches.length && !visited.has(forwardIndex)) {
+      orderedBatches.push(batches[forwardIndex]);
+      visited.add(forwardIndex);
+    }
+
+    // Backward batch (before current)
+    const backwardIndex = currentBatchIndex - offset;
+    if (backwardIndex >= 0 && !visited.has(backwardIndex)) {
+      orderedBatches.push(batches[backwardIndex]);
+      visited.add(backwardIndex);
+    }
+
+    offset++;
+
+    // Safety: break if we've checked more than necessary
+    if (offset > batches.length) break;
+  }
+
+  return orderedBatches;
+}
+
+/**
  * Translate subtitles in background without blocking UI
- * 
+ *
  * Strategy:
+ * - Prioritize translating cues near current playback position first
  * - If provider is Google Translate: Direct translation, no context needed
- * - If provider is AI (Claude/ChatGPT/Ollama): 
+ * - If provider is AI (Claude/ChatGPT/Ollama):
  *   1. First pass: Quick Google Translate for immediate display
  *   2. Second pass: AI translation with context for quality (replaces Google results)
- * 
+ *
  * @param cues - The cues to translate
  * @param sourceLanguage - The actual source language of the content
  * @param targetLanguage - The target language for translation
@@ -986,50 +1063,60 @@ async function translateInBackground(
 ): Promise<void> {
   if (isPreTranslating) return;
   isPreTranslating = true;
-  
+
   // Clear previous translations
   preTranslatedCuesMap.clear();
-  
+
   try {
     // Get current provider from auth config
     const authConfig = await getAuthConfigFromBridge();
     const selectedProvider = authConfig?.selectedProvider || 'google-translate';
     const isAIProvider = selectedProvider !== 'google-translate';
-    
+
     log.debug(`[Content] Translation provider: ${selectedProvider}, isAI: ${isAIProvider}`);
-    
+
+    // Find current playback position to prioritize translation
+    const currentCueIndex = findCurrentCueIndex(cues);
+    log.debug(`[Content] Current cue index: ${currentCueIndex} (video position-based priority)`);
+
     // Group cues into batches for efficient translation
+    // IMPORTANT: Use the original cue.index to ensure correct mapping back to preTranslatedCuesWithTiming
     const batchSize = 10;
     interface CueBatch {
       cueIndices: number[];
       cues: Array<{ index: number; text: string }>;
     }
     const batches: CueBatch[] = [];
-    
+
     for (let i = 0; i < cues.length; i += batchSize) {
       const batchCues = cues.slice(i, i + batchSize);
       batches.push({
-        cueIndices: batchCues.map((_, idx) => i + idx),
-        cues: batchCues.map((c, idx) => ({ index: i + idx, text: c.text })),
+        // Use original cue.index, not calculated position
+        cueIndices: batchCues.map(c => c.index),
+        cues: batchCues.map(c => ({ index: c.index, text: c.text })),
       });
     }
+
+    // Order batches by priority: start from current position, expand outward
+    const prioritizedBatches = orderBatchesByPriority(batches, currentCueIndex, batchSize);
+    log.debug(`[Content] Batch order: starting from batch containing cue ${currentCueIndex}`);
     
     // ========================================================================
     // Phase 1: Quick Google Translate (if using AI provider)
-    // Use batch translation for speed - much faster than translating one by one
+    // Use batch translation for speed - prioritize batches near current playback
     // ========================================================================
     if (isAIProvider) {
-      log.debug(`[Content] Phase 1: Quick Google Translate for ${cues.length} cues in ${batches.length} batches...`);
+      log.debug(`[Content] Phase 1: Quick Google Translate for ${cues.length} cues in ${prioritizedBatches.length} batches (prioritized by playback position)...`);
       showInfoToast('正在快速翻譯中...');
-      
+
       let quickTranslatedCount = 0;
       let completedBatches = 0;
-      
-      for (const batch of batches) {
+
+      for (const batch of prioritizedBatches) {
         if (!realtimeTranslator || realtimeTranslator.getState() !== 'active') {
           break;
         }
-        
+
         try {
           // Use batch translation with forceProvider for much faster results
           const result = await translateBatch({
@@ -1038,30 +1125,41 @@ async function translateInBackground(
             targetLanguage,
             forceProvider: 'google-translate',
           });
-          
+
           // Process batch results
           for (const translatedCue of result.cues) {
             const originalCue = batch.cues.find(c => c.index === translatedCue.index);
             const original = originalCue?.text.trim() || '';
             const translated = translatedCue.translatedText.trim();
-            
+
             if (original && translated) {
               preTranslatedCuesMap.set(original, translated);
-              if (translatedCue.index < preTranslatedCuesWithTiming.length) {
+              // Use text matching to ensure correct timing association
+              let updated = false;
+              for (const timingCue of preTranslatedCuesWithTiming) {
+                if (timingCue.originalText.trim() === original) {
+                  timingCue.translatedText = translated;
+                  updated = true;
+                  break;
+                }
+              }
+              // Fallback to index-based update if text match fails
+              if (!updated && translatedCue.index < preTranslatedCuesWithTiming.length) {
                 preTranslatedCuesWithTiming[translatedCue.index].translatedText = translated;
               }
               quickTranslatedCount++;
             }
           }
-          
+
           completedBatches++;
-          
+
           // Refresh display after each batch to show Google Translate results progressively
+          // This is especially important for the first batch (near current position)
           if (realtimeTranslator && realtimeTranslator.getState() === 'active') {
             realtimeTranslator.refreshCurrentCue();
           }
-          
-          const progress = Math.round((completedBatches / batches.length) * 50); // 0-50% for phase 1
+
+          const progress = Math.round((completedBatches / prioritizedBatches.length) * 50); // 0-50% for phase 1
           translateButton?.setProgress(progress);
           floatingButton?.setProgress(progress);
         } catch (error) {
@@ -1069,31 +1167,32 @@ async function translateInBackground(
           // Continue with next batch
         }
       }
-      
+
       log.debug(`[Content] Phase 1 complete. ${quickTranslatedCount} cues quick-translated in ${completedBatches} batches.`);
       showInfoToast('快速翻譯完成，正在進行 AI 精翻...');
     }
-    
+
     // ========================================================================
     // Phase 2: AI Translation with context (or Google Translate if that's the provider)
     // Use parallel processing to speed up - process PARALLEL_BATCH_COUNT batches at a time
+    // Batches are already prioritized by playback position
     // ========================================================================
     const PARALLEL_BATCH_COUNT = 3; // Number of batches to process in parallel
-    log.debug(`[Content] ${isAIProvider ? 'Phase 2: AI' : 'Translating'} ${batches.length} batches (${PARALLEL_BATCH_COUNT} parallel)...`);
+    log.debug(`[Content] ${isAIProvider ? 'Phase 2: AI' : 'Translating'} ${prioritizedBatches.length} batches (${PARALLEL_BATCH_COUNT} parallel, prioritized)...`);
 
     let translatedCount = 0;
     let successfulBatches = 0;
     let failedBatches = 0;
 
-    // Process batches in parallel groups
-    for (let i = 0; i < batches.length; i += PARALLEL_BATCH_COUNT) {
+    // Process prioritized batches in parallel groups
+    for (let i = 0; i < prioritizedBatches.length; i += PARALLEL_BATCH_COUNT) {
       if (!realtimeTranslator || realtimeTranslator.getState() !== 'active') {
         log.debug('[Content] Translator stopped, aborting background translation');
         break;
       }
 
-      // Get the next group of batches to process in parallel
-      const batchGroup = batches.slice(i, i + PARALLEL_BATCH_COUNT);
+      // Get the next group of prioritized batches to process in parallel
+      const batchGroup = prioritizedBatches.slice(i, i + PARALLEL_BATCH_COUNT);
       
       try {
         // Process all batches in this group in parallel
@@ -1112,7 +1211,7 @@ async function translateInBackground(
         for (let j = 0; j < results.length; j++) {
           const result = results[j];
           const batch = batchGroup[j];
-          
+
           if (result.status === 'fulfilled') {
             let batchSuccessCount = 0;
             for (const translatedCue of result.value.cues) {
@@ -1126,7 +1225,18 @@ async function translateInBackground(
                 preTranslatedCuesMap.set(original, translated);
 
                 // Update the timing cue with translation
-                if (cueIndex < preTranslatedCuesWithTiming.length) {
+                // Use text matching as primary method to ensure correct timing association
+                // This prevents timing shifts when indices don't match array positions
+                let updated = false;
+                for (const timingCue of preTranslatedCuesWithTiming) {
+                  if (timingCue.originalText.trim() === original) {
+                    timingCue.translatedText = translated;
+                    updated = true;
+                    break;
+                  }
+                }
+                // Fallback to index-based update if text match fails
+                if (!updated && cueIndex < preTranslatedCuesWithTiming.length) {
                   preTranslatedCuesWithTiming[cueIndex].translatedText = translated;
                 }
                 batchSuccessCount++;
@@ -1149,11 +1259,11 @@ async function translateInBackground(
         const progressBase = isAIProvider ? 50 : 0;
         const progressRange = isAIProvider ? 50 : 100;
         const completedBatchCount = i + batchGroup.length;
-        const progress = progressBase + Math.round((completedBatchCount / batches.length) * progressRange);
+        const progress = progressBase + Math.round((completedBatchCount / prioritizedBatches.length) * progressRange);
 
         translateButton?.setProgress(progress);
         floatingButton?.setProgress(progress);
-        
+
         // Refresh display to show updated translations immediately
         realtimeTranslator?.refreshCurrentCue();
 
@@ -1165,9 +1275,9 @@ async function translateInBackground(
         // Continue with next batch instead of stopping
       }
     }
-    
-    log.debug(`[Content] Background translation complete. Successful: ${successfulBatches}/${batches.length} batches, ${translatedCount}/${cues.length} cues translated`);
-    
+
+    log.debug(`[Content] Background translation complete. Successful: ${successfulBatches}/${prioritizedBatches.length} batches, ${translatedCount}/${cues.length} cues translated`);
+
     // Only show success and save if we have successful translations
     if (translatedCount > 0) {
       // Update button state
@@ -1175,9 +1285,9 @@ async function translateInBackground(
       floatingButton?.setState('complete');
       settingsPanel?.updateSubtitleState(getSubtitleState());
       showSuccessToast(`翻譯完成！共 ${translatedCount} 句`);
-      
+
       if (failedBatches > 0) {
-        log.warn(`[Content] Some batches failed (${failedBatches}/${batches.length}), but ${translatedCount} cues were successfully translated`);
+        log.warn(`[Content] Some batches failed (${failedBatches}/${prioritizedBatches.length}), but ${translatedCount} cues were successfully translated`);
       }
     } else {
       // All translations failed

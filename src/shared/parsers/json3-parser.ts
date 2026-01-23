@@ -163,31 +163,23 @@ export function parseJSON3(content: string, options?: JSON3ParseOptions): JSON3P
       continue;
     }
     
-    // For ASR: preserve original timing to maintain sync with audio
-    // For manual: adjust if cue starts before the last one ended (handles overlaps)
-    let adjustedStartTime: number;
-    if (isASR) {
-      // ASR: use original timing - this is critical for sync
-      adjustedStartTime = startTime;
-    } else {
-      // Manual: adjust overlapping cues
-      adjustedStartTime = Math.max(startTime, lastEndTime);
-    }
-    
+    // IMPORTANT: Always preserve original timing to prevent time shifting in translations
+    // Both ASR and manual subtitles should maintain their original timing
+    // This is critical for translation sync - the translated text must appear at the same time
     cues.push({
       index: cueIndex++,
-      startTime: adjustedStartTime,
-      endTime,
+      startTime,  // Always use original startTime
+      endTime,    // Always use original endTime
       text
     });
-    
+
     lastEndTime = endTime;
   }
-  
-  // Post-process: merge consecutive cues
-  // For ASR: skip merging to preserve timing granularity
-  // For manual: merge duplicate cues (for karaoke-style subs)
-  const processedCues = isASR ? cues : mergeDuplicateCues(cues);
+
+  // IMPORTANT: Skip merging to preserve original timing granularity
+  // Merging cues can cause timing shifts that affect translation display
+  // Both ASR and manual subtitles should maintain their original timing structure
+  const processedCues = cues;
   
   // Re-index after processing
   const reindexedCues = processedCues.map((cue, idx) => ({
