@@ -835,6 +835,7 @@ async function startRealtimeTranslation(targetLanguage: string): Promise<void> {
       } else {
         showInfoToast('此影片沒有可用的字幕');
       }
+      translationStartLock = false;  // Release lock before early return
       return;
     }
 
@@ -1180,7 +1181,9 @@ async function translateInBackground(
               if (cueIndex >= 0 && cueIndex < preTranslatedCuesWithTiming.length) {
                 const timingCue = preTranslatedCuesWithTiming[cueIndex];
                 // Verify the text matches to avoid mismatched indices
-                if (timingCue.originalText.trim() === original) {
+                // Also check that cue hasn't been translated yet to avoid overwriting
+                // on-demand translations that may have completed faster
+                if (timingCue.originalText.trim() === original && timingCue.translatedText === timingCue.originalText) {
                   timingCue.translatedText = translated;
                   quickTranslatedCount++;
                   continue;
@@ -1279,7 +1282,9 @@ async function translateInBackground(
                 if (cueIndex >= 0 && cueIndex < preTranslatedCuesWithTiming.length) {
                   const timingCue = preTranslatedCuesWithTiming[cueIndex];
                   // Verify the text matches to avoid mismatched indices
-                  if (timingCue.originalText.trim() === original) {
+                  // Also check that cue hasn't been translated yet to avoid overwriting
+                  // on-demand translations that may have completed faster
+                  if (timingCue.originalText.trim() === original && timingCue.translatedText === timingCue.originalText) {
                     timingCue.translatedText = translated;
                     batchSuccessCount++;
                     continue;
