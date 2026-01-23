@@ -266,3 +266,122 @@ npm test
 - 修復日期: 2026-01-23 ~ 2026-01-24
 - 相關 commits: `0058375`, `798fefc`, `1fb5110`, `1d4d19a`, `e1b0b57`
 - ASR 合併優化: 2026-01-24
+
+---
+
+## 修復 6: ASR 字幕時間策略與雙層顯示模式
+**日期:** 2026-01-24
+
+### 問題描述
+
+YouTube 自動產生的字幕（ASR）是逐字顯示的，當我們把這些碎片合併成完整句子後，時間軸會出現偏移：
+
+```
+原本 YouTube 顯示:
+00:01.0 "Hello"
+00:01.5 "world"
+00:02.0 "test"
+
+我們合併後顯示:
+00:01.0 "Hello world test" → 整句在第一個字就出現，時間感覺超前
+```
+
+### 解決方案
+
+#### 1. 加權時間策略 (Weighted Timing Strategy)
+
+**修改檔案:** `src/shared/utils/asr-consolidator.ts`
+
+新增 `timingStrategy` 選項：
+
+| 策略 | 說明 |
+|------|------|
+| `first` (預設) | 使用第一個片段的開始時間 |
+| `last` | 使用最後一個片段的開始時間（語句說完才顯示） |
+| `weighted` | 根據文字長度加權計算時間（推薦用於 ASR） |
+| `midpoint` | 使用第一個和最後一個片段的中間時間點 |
+
+```typescript
+case 'weighted': {
+  // 根據文字長度加權計算開始時間
+  let totalWeight = 0;
+  let weightedTime = 0;
+  for (const cue of currentGroup) {
+    const weight = cue.text.trim().length;
+    weightedTime += cue.startTime * weight;
+    totalWeight += weight;
+  }
+  startTime = totalWeight > 0 ? Math.round(weightedTime / totalWeight) : firstCue.startTime;
+  // 延長結束時間確保足夠閱讀時間
+  const remainingAudio = lastCue.endTime - startTime;
+  const minDisplayTime = Math.max(2000, remainingAudio + 500);
+  endTime = Math.max(lastCue.endTime, startTime + minDisplayTime);
+  break;
+}
+```
+
+**效果:** 合併後的字幕會根據文字分布，在適當的時間點出現，減少「超前顯示」的感覺。
+
+#### 2. 雙層顯示模式 (Dual-Layer Display)
+
+**修改檔案:**
+- `src/content/adapters/types.ts` - 新增 `hideNativeSubtitles` 選項
+- `src/content/realtime-translator.ts` - 實作雙層顯示定位
+
+新增 `hideNativeSubtitles` 選項到 `RenderOptions`:
+
+```typescript
+/**
+ * 是否隱藏平台原生字幕
+ * - true: 隱藏原生字幕，只顯示我們的雙語 overlay
+ * - false: 保留原生字幕，同時顯示翻譯 overlay（位置較高避免重疊）
+ */
+hideNativeSubtitles?: boolean;  // 預設: true
+```
+
+當 `hideNativeSubtitles: false` 時:
+- 原生的 YouTube 逐字字幕保持顯示（保留原始時間軸）
+- 我們的翻譯 overlay 位置上移（15% from bottom）避免重疊
+- 使用者可以同時看到原生進度字幕 + 完整翻譯句子
+
+```css
+/* 當原生字幕可見時，將 overlay 上移 */
+.ai-subtitle-overlay.ai-subtitle-overlay-above-native {
+  bottom: 15%;
+}
+```
+
+#### 3. 使用者控制
+
+**修改檔案:**
+- `src/content/ui/settings-panel.ts` - 新增設定面板控制
+- `src/content/index.ts` - 新增鍵盤快捷鍵
+
+| 控制方式 | 功能 |
+|---------|------|
+| 設定面板 | 「隱藏原生字幕」開關 |
+| **Shift + N** | 快速切換原生字幕顯示/隱藏 |
+| Shift + ← | 延遲字幕 500ms |
+| Shift + → | 提前字幕 500ms |
+| Shift + 0 | 重置時間偏移 |
+
+**設定持久化:** 所有設定儲存在 localStorage，重新整理頁面後保留。
+
+### 測試驗證
+
+```bash
+npm test
+# Test Files  15 passed (15)
+# Tests  355 passed (355)   # 新增 4 個時間策略測試
+```
+
+### 相關檔案修改
+
+| 檔案 | 變更 |
+|------|------|
+| `src/shared/utils/asr-consolidator.ts` | 新增 `timingStrategy` 選項及實作 |
+| `src/content/adapters/types.ts` | 新增 `hideNativeSubtitles` 到 `RenderOptions` |
+| `src/content/realtime-translator.ts` | 實作雙層顯示定位及原生字幕控制 |
+| `src/content/ui/settings-panel.ts` | 新增設定面板控制項 |
+| `src/content/index.ts` | 使用 weighted 策略、新增 Shift+N 快捷鍵 |
+| `tests/unit/utils/asr-consolidator.test.ts` | 新增時間策略測試 |

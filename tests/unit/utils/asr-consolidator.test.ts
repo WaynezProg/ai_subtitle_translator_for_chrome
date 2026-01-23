@@ -164,6 +164,65 @@ describe('ASR Consolidator', () => {
       expect(consolidated[1].index).toBe(1);
       expect(consolidated[2].index).toBe(2);
     });
+
+    it('should use "first" timing strategy by default', () => {
+      const cues: Cue[] = [
+        { index: 0, startTime: 1000, endTime: 1500, text: 'Hello' },
+        { index: 1, startTime: 1500, endTime: 2000, text: 'world' },
+        { index: 2, startTime: 2000, endTime: 2500, text: 'test' },
+      ];
+
+      const consolidated = consolidateASRCues(cues);
+
+      expect(consolidated.length).toBe(1);
+      expect(consolidated[0].startTime).toBe(1000); // First cue's startTime
+      expect(consolidated[0].endTime).toBe(2500);   // Last cue's endTime
+    });
+
+    it('should use "last" timing strategy when specified', () => {
+      const cues: Cue[] = [
+        { index: 0, startTime: 1000, endTime: 1500, text: 'Hello' },
+        { index: 1, startTime: 1500, endTime: 2000, text: 'world' },
+        { index: 2, startTime: 2000, endTime: 2500, text: 'test' },
+      ];
+
+      const consolidated = consolidateASRCues(cues, { timingStrategy: 'last' });
+
+      expect(consolidated.length).toBe(1);
+      expect(consolidated[0].startTime).toBe(2000); // Last cue's startTime
+      // endTime should be extended for adequate display time
+      expect(consolidated[0].endTime).toBeGreaterThanOrEqual(2500);
+    });
+
+    it('should use "midpoint" timing strategy when specified', () => {
+      const cues: Cue[] = [
+        { index: 0, startTime: 1000, endTime: 1500, text: 'Hello' },
+        { index: 1, startTime: 1500, endTime: 2000, text: 'world' },
+        { index: 2, startTime: 2000, endTime: 2500, text: 'test' },
+      ];
+
+      const consolidated = consolidateASRCues(cues, { timingStrategy: 'midpoint' });
+
+      expect(consolidated.length).toBe(1);
+      expect(consolidated[0].startTime).toBe(1500); // Midpoint of 1000 and 2000
+      expect(consolidated[0].endTime).toBe(2500);
+    });
+
+    it('should use "weighted" timing strategy when specified', () => {
+      const cues: Cue[] = [
+        { index: 0, startTime: 1000, endTime: 1500, text: 'Hi' },      // 2 chars
+        { index: 1, startTime: 1500, endTime: 2000, text: 'there' },   // 5 chars
+        { index: 2, startTime: 2000, endTime: 2500, text: 'everyone' }, // 8 chars
+      ];
+
+      const consolidated = consolidateASRCues(cues, { timingStrategy: 'weighted' });
+
+      expect(consolidated.length).toBe(1);
+      // Weighted average: (1000*2 + 1500*5 + 2000*8) / (2+5+8) = 25500 / 15 = 1700
+      expect(consolidated[0].startTime).toBe(1700);
+      // endTime should be extended for adequate display time
+      expect(consolidated[0].endTime).toBeGreaterThanOrEqual(2500);
+    });
   });
 
   describe('isFragmentedASR', () => {

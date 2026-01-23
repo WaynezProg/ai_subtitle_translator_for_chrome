@@ -631,6 +631,9 @@ export function createSettingsPanel(options: SettingsPanelOptions): SettingsPane
     // Bilingual mode toggle
     section.appendChild(createBilingualControl());
 
+    // Native subtitles visibility toggle
+    section.appendChild(createNativeSubtitlesControl());
+
     return section;
   }
 
@@ -922,6 +925,59 @@ export function createSettingsPanel(options: SettingsPanelOptions): SettingsPane
     return row;
   }
 
+  /**
+   * Create native subtitles visibility toggle control
+   * When disabled (hideNativeSubtitles=false), shows both native YouTube subtitles
+   * and our translation overlay simultaneously
+   */
+  function createNativeSubtitlesControl(): HTMLElement {
+    const row = document.createElement('div');
+    row.className = 'settings-row';
+
+    const label = document.createElement('label');
+    label.textContent = '隱藏原生字幕';
+    label.htmlFor = 'settings-hide-native';
+    row.appendChild(label);
+
+    const control = document.createElement('div');
+    control.className = 'settings-control';
+
+    // Toggle switch
+    const toggle = document.createElement('label');
+    toggle.className = 'toggle-switch';
+
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.id = 'settings-hide-native';
+    // Default to true (hide native subtitles)
+    checkbox.checked = currentOptions.hideNativeSubtitles !== false;
+    toggle.appendChild(checkbox);
+
+    const slider = document.createElement('span');
+    slider.className = 'toggle-slider';
+    toggle.appendChild(slider);
+
+    control.appendChild(toggle);
+
+    // Help text
+    const helpText = document.createElement('span');
+    helpText.className = 'setting-help-text';
+    helpText.style.fontSize = '11px';
+    helpText.style.opacity = '0.7';
+    helpText.style.marginLeft = '8px';
+    helpText.textContent = checkbox.checked ? '' : '同時顯示原生字幕';
+    control.appendChild(helpText);
+
+    checkbox.addEventListener('change', () => {
+      const hideNativeSubtitles = checkbox.checked;
+      helpText.textContent = hideNativeSubtitles ? '' : '同時顯示原生字幕';
+      handleSettingsChange({ hideNativeSubtitles });
+    });
+
+    row.appendChild(control);
+    return row;
+  }
+
   return {
     mount(container: HTMLElement): void {
       if (panel) return;
@@ -1026,6 +1082,16 @@ export function createSettingsPanel(options: SettingsPanelOptions): SettingsPane
           fontSizeSlider.value = String(newOptions.fontSize);
           const valueEl = fontSizeSlider.parentElement?.querySelector('.slider-value');
           if (valueEl) valueEl.textContent = `${newOptions.fontSize}px`;
+        }
+
+        // Update hideNativeSubtitles checkbox
+        const hideNativeCheckbox = panel.querySelector('#settings-hide-native') as HTMLInputElement;
+        if (hideNativeCheckbox && newOptions.hideNativeSubtitles !== undefined) {
+          hideNativeCheckbox.checked = newOptions.hideNativeSubtitles;
+          const helpText = hideNativeCheckbox.closest('.settings-control')?.querySelector('.setting-help-text');
+          if (helpText) {
+            helpText.textContent = newOptions.hideNativeSubtitles ? '' : '同時顯示原生字幕';
+          }
         }
 
         // Update other controls as needed...

@@ -62,24 +62,38 @@ export interface RawSubtitle {
 export interface RenderOptions {
   /** Font size in pixels */
   fontSize: number;
-  
+
   /** Font color in hex format (e.g., '#FFFFFF') */
   fontColor: string;
-  
+
   /** Position on screen */
   position: 'top' | 'bottom';
-  
+
   /** Show bilingual subtitles */
   bilingual: boolean;
-  
+
   /** If bilingual, which is on top */
   bilingualOrder: 'original-first' | 'translation-first';
-  
+
   /** Background style */
   background: 'none' | 'shadow' | 'box';
-  
+
   /** Font family */
   fontFamily: string;
+
+  /**
+   * Whether to hide native platform subtitles when showing translated overlay.
+   * - true: Hide native subtitles (show only our overlay with original + translation)
+   * - false: Keep native subtitles visible (show translation overlay alongside native)
+   *
+   * When false, this allows users to see progressive word-by-word native subtitles
+   * while also seeing the complete translated sentence overlay. This is especially
+   * useful for ASR (auto-generated) subtitles where the native display shows
+   * progressive word-by-word timing.
+   *
+   * Default: true (hide native subtitles)
+   */
+  hideNativeSubtitles?: boolean;
 }
 
 /**
@@ -199,5 +213,6 @@ export const DEFAULT_RENDER_OPTIONS: RenderOptions = {
   bilingual: true,
   bilingualOrder: 'original-first',
   background: 'box',
-  fontFamily: 'system-ui, -apple-system, sans-serif'
+  fontFamily: 'system-ui, -apple-system, sans-serif',
+  hideNativeSubtitles: true
 };

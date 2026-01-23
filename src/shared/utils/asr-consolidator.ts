@@ -12,6 +12,17 @@
  *
  * This consolidator groups nearby ASR segments into logical sentence units
  * for better alignment in bilingual display.
+ *
+ * TIMING ALIGNMENT STRATEGY:
+ * The consolidated cue uses the FIRST word's startTime as the display start time.
+ * This ensures the translation appears at the same moment the original audio begins,
+ * allowing viewers to read ahead while listening. The endTime extends to the last
+ * word's endTime to ensure the subtitle stays visible for the full duration.
+ *
+ * This approach matches the expected behavior where:
+ * - Original ASR shows words progressively as they're spoken
+ * - Our consolidated translation shows the full sentence from the start of the phrase
+ * - Both are visible for the same overall time window
  */
 
 import type { Cue } from '../types/subtitle';
@@ -46,6 +57,16 @@ export interface ASRConsolidationOptions {
    * If a segment ends with one of these, it's considered a sentence break.
    */
   sentenceEndChars?: string[];
+
+  /**
+   * Strategy for determining the start time of consolidated cues.
+   * - 'first': Use first segment's start time (default) - shows full translation immediately
+   * - 'last': Use last segment's start time - shows translation when sentence is complete in audio
+   * - 'weighted': Use weighted average based on text length - balances early display with timing
+   * - 'midpoint': Use midpoint of first and last segment start times
+   * Default: 'first'
+   */
+  timingStrategy?: 'first' | 'last' | 'weighted' | 'midpoint';
 }
 
 /**
@@ -56,6 +77,7 @@ const DEFAULT_OPTIONS: Required<ASRConsolidationOptions> = {
   maxDurationMs: 8000,
   minCharsForSentence: 5,
   sentenceEndChars: ['.', '!', '?', '。', '！', '？', '…', '；', ';'],
+  timingStrategy: 'first',
 };
 
 /**
@@ -98,10 +120,56 @@ export function consolidateASRCues(cues: Cue[], options?: ASRConsolidationOption
     const firstCue = currentGroup[0];
     const lastCue = currentGroup[currentGroup.length - 1];
 
+    // Calculate start time based on timing strategy
+    let startTime: number;
+    let endTime = lastCue.endTime;
+
+    switch (opts.timingStrategy) {
+      case 'last': {
+        // Use last segment's start time - shows translation when sentence is complete in audio
+        // This aligns the consolidated subtitle with when the speaker finishes the sentence
+        startTime = lastCue.startTime;
+        // Extend endTime to ensure the subtitle stays visible for at least the full sentence duration
+        // This prevents the subtitle from disappearing too quickly
+        const originalDuration = lastCue.endTime - firstCue.startTime;
+        const minDisplayTime = Math.max(2000, originalDuration); // At least 2 seconds or original duration
+        endTime = Math.max(lastCue.endTime, startTime + minDisplayTime);
+        break;
+      }
+      case 'weighted': {
+        // Weight start time based on text length distribution
+        // This ensures the subtitle appears closer to when most of the text is spoken
+        let totalWeight = 0;
+        let weightedTime = 0;
+        for (const cue of currentGroup) {
+          const weight = cue.text.trim().length;
+          weightedTime += cue.startTime * weight;
+          totalWeight += weight;
+        }
+        startTime = totalWeight > 0 ? Math.round(weightedTime / totalWeight) : firstCue.startTime;
+        // Ensure subtitle stays visible for at least the remaining duration after weighted start
+        // plus a small buffer for reading time
+        const remainingAudio = lastCue.endTime - startTime;
+        const minDisplayTime = Math.max(2000, remainingAudio + 500); // At least 2s or remaining + 0.5s buffer
+        endTime = Math.max(lastCue.endTime, startTime + minDisplayTime);
+        break;
+      }
+      case 'midpoint': {
+        // Use midpoint between first and last segment start times
+        startTime = Math.round((firstCue.startTime + lastCue.startTime) / 2);
+        break;
+      }
+      case 'first':
+      default:
+        // Use first segment's start time (original behavior)
+        startTime = firstCue.startTime;
+        break;
+    }
+
     consolidated.push({
       index: consolidated.length,
-      startTime: firstCue.startTime,
-      endTime: lastCue.endTime,
+      startTime,
+      endTime,
       text: combinedText,
       // If any cue had a translation, combine them too
       translatedText: currentGroup.some(c => c.translatedText)
