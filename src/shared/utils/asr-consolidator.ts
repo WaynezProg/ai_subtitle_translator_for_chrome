@@ -34,16 +34,23 @@ export interface ASRConsolidationOptions {
   /**
    * Maximum time gap (ms) between segments to consider them part of the same sentence.
    * Segments with gaps larger than this will start a new sentence group.
-   * Default: 1500ms (1.5 seconds)
+   * Default: 1200ms (1.2 seconds)
    */
   maxGapMs?: number;
 
   /**
    * Maximum duration (ms) for a consolidated cue.
-   * Prevents overly long sentences.
-   * Default: 8000ms (8 seconds)
+   * Prevents overly long sentences that cause audio/subtitle desync.
+   * Default: 5000ms (5 seconds) - optimized for YouTube ASR
    */
   maxDurationMs?: number;
+
+  /**
+   * Maximum number of characters for a consolidated cue.
+   * Prevents overly long text that's hard to read during playback.
+   * Default: 80 characters (approximately 2 lines of subtitles)
+   */
+  maxCharsPerCue?: number;
 
   /**
    * Minimum number of characters to consider a cue complete.
@@ -84,15 +91,17 @@ export interface ASRConsolidationOptions {
  * for the full duration of speech.
  *
  * OPTIMIZATION NOTES (YouTube ASR):
- * - maxGapMs: 1200ms (reduced from 1500ms) to create more natural sentence breaks
- * - maxDurationMs: 6000ms (reduced from 8000ms) for better readability
+ * - maxGapMs: 1200ms to create more natural sentence breaks
+ * - maxDurationMs: 5000ms (5 seconds) to prevent audio/subtitle desync
+ * - maxCharsPerCue: 80 characters (~2 lines) for readability
  * - These values balance between too-fragmented (hard to read) and too-long (timing mismatch)
  */
 const DEFAULT_OPTIONS: Required<ASRConsolidationOptions> = {
-  maxGapMs: 1200,           // Reduced: creates more natural sentence breaks
-  maxDurationMs: 6000,      // Reduced: shorter sentences for better timing alignment
+  maxGapMs: 1200,           // Creates more natural sentence breaks
+  maxDurationMs: 5000,      // 5 seconds max to prevent desync with audio
+  maxCharsPerCue: 80,       // ~2 lines of subtitle text for readability
   minCharsForSentence: 5,
-  sentenceEndChars: ['.', '!', '?', '。', '！', '？', '…', '；', ';', ',', '，'],  // Added comma for better breaks
+  sentenceEndChars: ['.', '!', '?', '。', '！', '？', '…', '；', ';', ',', '，'],  // Punctuation breaks
   timingStrategy: 'first',  // Shows translation when speech begins (recommended for ASR)
 };
 
@@ -221,12 +230,20 @@ export function consolidateASRCues(cues: Cue[], options?: ASRConsolidationOption
     const groupDuration = cue.endTime - groupStartTime;
     const lastText = lastCue.text.trim();
 
+    // Calculate current group's total character count
+    const currentGroupChars = currentGroup.reduce((sum, c) => sum + c.text.trim().length, 0);
+    const newCueChars = cue.text.trim().length;
+    // Add 1 for the space that will be inserted between cues
+    const projectedChars = currentGroupChars + 1 + newCueChars;
+
     // Check if we should start a new group
     const shouldBreak =
       // Gap is too large
       gap > opts.maxGapMs ||
-      // Group duration would exceed maximum
+      // Group duration would exceed maximum (prevents audio/subtitle desync)
       groupDuration > opts.maxDurationMs ||
+      // Group character count would exceed maximum (prevents overly long text)
+      projectedChars > opts.maxCharsPerCue ||
       // Last cue ended with sentence-ending punctuation
       opts.sentenceEndChars.some(char => lastText.endsWith(char));
 

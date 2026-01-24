@@ -926,3 +926,70 @@ Translate subtitle lines from Traditional Chinese (繁體中文) to English (Eng
 npm run typecheck  # 通過
 npm run test:unit  # 379 測試全數通過
 ```
+
+---
+
+## 修復 13: 新增字元數量限制防止句子過長
+**日期:** 2026-01-25
+
+### 問題描述
+
+ASR 字幕合併後，某些句子可能過長（字元數過多），導致：
+1. 人聲和字幕不同步
+2. 觀眾難以在限定時間內閱讀完整字幕
+
+### 解決方案
+
+新增 `maxCharsPerCue` 選項，限制合併後的字元數量。
+
+**修改檔案:** `src/shared/utils/asr-consolidator.ts`
+
+```typescript
+export interface ASRConsolidationOptions {
+  // ... 其他選項
+  /**
+   * Maximum number of characters for a consolidated cue.
+   * Prevents overly long text that's hard to read during playback.
+   * Default: 80 characters (approximately 2 lines of subtitles)
+   */
+  maxCharsPerCue?: number;
+}
+
+const DEFAULT_OPTIONS: Required<ASRConsolidationOptions> = {
+  maxGapMs: 1200,
+  maxDurationMs: 5000,      // 縮短至 5 秒
+  maxCharsPerCue: 80,       // 約 2 行字幕
+  // ...
+};
+```
+
+### 截斷邏輯
+
+合併時檢查以下條件，任一滿足即截斷：
+
+| 條件 | 預設值 | 說明 |
+|------|--------|------|
+| 時間間隙過大 | > 1200ms | 自然語句斷點 |
+| 持續時間過長 | > 5000ms | 防止音字不同步 |
+| **字元數過多** | > 80 字元 | 確保可讀性 |
+| 標點符號結尾 | `.!?。` 等 | 句子自然結束 |
+
+### 效果
+
+**修復前:**
+```
+[00:01.0-00:08.0] "Hello world this is a very long sentence that keeps going and going without any breaks making it hard to read" (112 字元, 7 秒)
+```
+
+**修復後:**
+```
+[00:01.0-00:04.0] "Hello world this is a very long sentence" (41 字元, 3 秒)
+[00:04.0-00:08.0] "that keeps going and going without any breaks" (46 字元, 4 秒)
+```
+
+### 測試驗證
+
+```bash
+npm run typecheck  # 通過
+npm run test:unit  # 379 測試全數通過
+```
