@@ -23,6 +23,7 @@ import type {
 } from './types';
 import { ProviderError } from './types';
 import { API_ENDPOINTS, TRANSLATION_CONFIG } from '../utils/constants';
+import { getLanguageDisplayName } from '../utils/helpers';
 
 // ============================================================================
 // Constants
@@ -319,9 +320,13 @@ export class OpenAIApiProvider implements TranslationProvider {
   
   private buildMessages(request: TranslationRequest): Array<{ role: string; content: string }> {
     const { cues, sourceLanguage, targetLanguage, previousContext, characterGlossary, customInstructions } = request;
-    
+
+    // Use full language names for clarity in prompts
+    const sourceLangName = getLanguageDisplayName(sourceLanguage);
+    const targetLangName = getLanguageDisplayName(targetLanguage);
+
     // System message
-    let systemPrompt = `You are a professional subtitle translator. Translate subtitle lines from ${sourceLanguage} to ${targetLanguage}.
+    let systemPrompt = `You are a professional subtitle translator. Translate subtitle lines from ${sourceLangName} to ${targetLangName}.
 
 RULES:
 1. Preserve the exact index number [N] at the start of each line

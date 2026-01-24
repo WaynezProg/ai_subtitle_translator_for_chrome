@@ -23,6 +23,7 @@ import type {
 } from './types';
 import { ProviderError } from './types';
 import { API_ENDPOINTS, TRANSLATION_CONFIG } from '../utils/constants';
+import { getLanguageDisplayName } from '../utils/helpers';
 
 // ============================================================================
 // Constants
@@ -318,8 +319,12 @@ export class ClaudeApiProvider implements TranslationProvider {
   
   private buildTranslationPrompt(request: TranslationRequest): string {
     const { cues, sourceLanguage, targetLanguage, previousContext, characterGlossary, customInstructions } = request;
-    
-    let prompt = `You are a professional subtitle translator. Translate the following subtitle lines from ${sourceLanguage} to ${targetLanguage}.
+
+    // Use full language names for clarity in prompts
+    const sourceLangName = getLanguageDisplayName(sourceLanguage);
+    const targetLangName = getLanguageDisplayName(targetLanguage);
+
+    let prompt = `You are a professional subtitle translator. Translate the following subtitle lines from ${sourceLangName} to ${targetLangName}.
 
 IMPORTANT RULES:
 1. Preserve the exact index number [N] at the start of each line

@@ -123,9 +123,16 @@ export function generateId(): string {
 // ============================================================================
 
 /**
- * Get display name for language code
+ * Get display name for language code.
+ * For Chinese variants, returns explicit Traditional/Simplified Chinese
+ * to ensure AI models use the correct character set.
  */
 export function getLanguageDisplayName(code: string): string {
+  // Special handling for Chinese to ensure correct variant
+  // This is critical for translation prompts
+  if (code === 'zh-TW') return 'Traditional Chinese (繁體中文)';
+  if (code === 'zh-CN') return 'Simplified Chinese (简体中文)';
+
   try {
     const displayName = new Intl.DisplayNames(['en'], { type: 'language' });
     return displayName.of(code) || code;

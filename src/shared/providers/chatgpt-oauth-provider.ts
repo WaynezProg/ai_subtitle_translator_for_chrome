@@ -22,6 +22,7 @@ import type {
 } from './types';
 import { ProviderError } from './types';
 import { TRANSLATION_CONFIG } from '../utils/constants';
+import { getLanguageDisplayName } from '../utils/helpers';
 import {
   getValidChatGPTToken,
   validateChatGPTToken,
@@ -790,7 +791,11 @@ export class ChatGPTOAuthProvider implements TranslationProvider {
       2
     );
     
-    let prompt = `You are a professional subtitle translator. Translate the following subtitles from ${request.sourceLanguage} to ${request.targetLanguage}.
+    // Use full language names for clarity in prompts
+    const sourceLangName = getLanguageDisplayName(request.sourceLanguage);
+    const targetLangName = getLanguageDisplayName(request.targetLanguage);
+
+    let prompt = `You are a professional subtitle translator. Translate the following subtitles from ${sourceLangName} to ${targetLangName}.
 
 IMPORTANT RULES:
 1. Return ONLY valid JSON with the same structure

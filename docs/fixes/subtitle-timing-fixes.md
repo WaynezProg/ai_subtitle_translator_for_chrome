@@ -863,3 +863,66 @@ npm run test:unit  # 379 測試全數通過
 | `src/content/subtitle-renderer.ts` | 同步優化 Gap Handling |
 | `src/shared/utils/asr-consolidator.ts` | 優化合併參數 |
 | `CLAUDE.md` | 新增 ASR 優化文檔 |
+
+---
+
+## 修復 12: 明確指定繁體/簡體中文翻譯
+**日期:** 2026-01-25
+
+### 問題描述
+
+翻譯 prompt 中使用語言代碼（如 `zh-TW`）而非完整語言名稱，可能導致 AI 模型無法正確區分繁體中文和簡體中文。
+
+### 解決方案
+
+更新 `getLanguageDisplayName()` 函數，對中文語言代碼返回明確的語言名稱：
+
+**修改檔案:** `src/shared/utils/helpers.ts`
+
+```typescript
+export function getLanguageDisplayName(code: string): string {
+  // 特別處理中文以確保正確的字體變體
+  if (code === 'zh-TW') return 'Traditional Chinese (繁體中文)';
+  if (code === 'zh-CN') return 'Simplified Chinese (简体中文)';
+
+  try {
+    const displayName = new Intl.DisplayNames(['en'], { type: 'language' });
+    return displayName.of(code) || code;
+  } catch {
+    return code;
+  }
+}
+```
+
+### 更新的 Provider
+
+所有翻譯 provider 的 prompt 現在使用完整語言名稱：
+
+| Provider | 修改檔案 |
+|----------|---------|
+| Claude API | `src/shared/providers/claude-api-provider.ts` |
+| OpenAI API | `src/shared/providers/openai-api-provider.ts` |
+| Ollama | `src/shared/providers/ollama-provider.ts` |
+| Claude OAuth | `src/shared/providers/claude-oauth-provider.ts` |
+| Claude Subscription | `src/shared/providers/claude-subscription-provider.ts` |
+| ChatGPT OAuth | `src/shared/providers/chatgpt-oauth-provider.ts` |
+| ChatGPT Subscription | `src/shared/providers/chatgpt-subscription-provider.ts` |
+
+### Prompt 範例
+
+**修復前:**
+```
+Translate subtitle lines from zh-TW to en.
+```
+
+**修復後:**
+```
+Translate subtitle lines from Traditional Chinese (繁體中文) to English (English).
+```
+
+### 測試驗證
+
+```bash
+npm run typecheck  # 通過
+npm run test:unit  # 379 測試全數通過
+```
