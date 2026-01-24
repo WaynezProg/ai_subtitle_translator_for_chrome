@@ -29,6 +29,31 @@ import { getLanguageDisplayName } from '../utils/helpers';
 // Constants
 // ============================================================================
 
+/** Request timeout in milliseconds */
+const REQUEST_TIMEOUT_MS = 60000; // 60 seconds for AI inference
+
+/**
+ * Fetch with timeout support using AbortController
+ */
+async function fetchWithTimeout(
+  url: string,
+  options: RequestInit,
+  timeoutMs: number = REQUEST_TIMEOUT_MS
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+    return response;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 const OPENAI_MODELS: ModelInfo[] = [
   {
     id: 'gpt-4o-mini',
@@ -115,11 +140,15 @@ export class OpenAIApiProvider implements TranslationProvider {
     }
     
     try {
-      // List models to validate the key
-      const response = await fetch(`${this.baseUrl}/models`, {
-        method: 'GET',
-        headers: this.getHeaders(),
-      });
+      // List models to validate the key (shorter timeout for validation)
+      const response = await fetchWithTimeout(
+        `${this.baseUrl}/models`,
+        {
+          method: 'GET',
+          headers: this.getHeaders(),
+        },
+        10000 // 10 second timeout for validation
+      );
       
       if (response.ok) {
         return { valid: true };
@@ -170,17 +199,20 @@ export class OpenAIApiProvider implements TranslationProvider {
   
   async translate(request: TranslationRequest): Promise<TranslationResult> {
     const messages = this.buildMessages(request);
-    
-    const response = await fetch(`${this.baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: this.getHeaders(),
-      body: JSON.stringify({
-        model: request.model || OPENAI_MODELS[0].id,
-        messages,
-        max_tokens: 8192,
-        temperature: 0.3,
-      }),
-    });
+
+    const response = await fetchWithTimeout(
+      `${this.baseUrl}/chat/completions`,
+      {
+        method: 'POST',
+        headers: this.getHeaders(),
+        body: JSON.stringify({
+          model: request.model || OPENAI_MODELS[0].id,
+          messages,
+          max_tokens: 8192,
+          temperature: 0.3,
+        }),
+      }
+    );
     
     this.updateRateLimitInfo(response);
     
@@ -197,18 +229,21 @@ export class OpenAIApiProvider implements TranslationProvider {
     onProgress: (progress: StreamProgress) => void
   ): Promise<TranslationResult> {
     const messages = this.buildMessages(request);
-    
-    const response = await fetch(`${this.baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: this.getHeaders(),
-      body: JSON.stringify({
-        model: request.model || OPENAI_MODELS[0].id,
-        messages,
-        max_tokens: 8192,
-        temperature: 0.3,
-        stream: true,
-      }),
-    });
+
+    const response = await fetchWithTimeout(
+      `${this.baseUrl}/chat/completions`,
+      {
+        method: 'POST',
+        headers: this.getHeaders(),
+        body: JSON.stringify({
+          model: request.model || OPENAI_MODELS[0].id,
+          messages,
+          max_tokens: 8192,
+          temperature: 0.3,
+          stream: true,
+        }),
+      }
+    );
     
     this.updateRateLimitInfo(response);
     

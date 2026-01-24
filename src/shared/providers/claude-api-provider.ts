@@ -31,6 +31,31 @@ import { getLanguageDisplayName } from '../utils/helpers';
 
 const ANTHROPIC_API_VERSION = '2023-06-01';
 
+/** Request timeout in milliseconds */
+const REQUEST_TIMEOUT_MS = 60000; // 60 seconds for AI inference
+
+/**
+ * Fetch with timeout support using AbortController
+ */
+async function fetchWithTimeout(
+  url: string,
+  options: RequestInit,
+  timeoutMs: number = REQUEST_TIMEOUT_MS
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+    return response;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 const CLAUDE_MODELS: ModelInfo[] = [
   {
     id: 'claude-3-5-haiku-20241022',
@@ -108,16 +133,20 @@ export class ClaudeApiProvider implements TranslationProvider {
     }
     
     try {
-      // Make a minimal API call to validate the key
-      const response = await fetch(`${this.baseUrl}/messages`, {
-        method: 'POST',
-        headers: this.getHeaders(),
-        body: JSON.stringify({
-          model: 'claude-3-haiku-20240307',
-          max_tokens: 1,
-          messages: [{ role: 'user', content: 'Hi' }],
-        }),
-      });
+      // Make a minimal API call to validate the key (shorter timeout for validation)
+      const response = await fetchWithTimeout(
+        `${this.baseUrl}/messages`,
+        {
+          method: 'POST',
+          headers: this.getHeaders(),
+          body: JSON.stringify({
+            model: 'claude-3-haiku-20240307',
+            max_tokens: 1,
+            messages: [{ role: 'user', content: 'Hi' }],
+          }),
+        },
+        10000 // 10 second timeout for validation
+      );
       
       if (response.ok) {
         return { valid: true };
@@ -168,16 +197,19 @@ export class ClaudeApiProvider implements TranslationProvider {
   
   async translate(request: TranslationRequest): Promise<TranslationResult> {
     const prompt = this.buildTranslationPrompt(request);
-    
-    const response = await fetch(`${this.baseUrl}/messages`, {
-      method: 'POST',
-      headers: this.getHeaders(),
-      body: JSON.stringify({
-        model: request.model || CLAUDE_MODELS[0].id,
-        max_tokens: 8192,
-        messages: [{ role: 'user', content: prompt }],
-      }),
-    });
+
+    const response = await fetchWithTimeout(
+      `${this.baseUrl}/messages`,
+      {
+        method: 'POST',
+        headers: this.getHeaders(),
+        body: JSON.stringify({
+          model: request.model || CLAUDE_MODELS[0].id,
+          max_tokens: 8192,
+          messages: [{ role: 'user', content: prompt }],
+        }),
+      }
+    );
     
     this.updateRateLimitInfo(response);
     
@@ -194,17 +226,20 @@ export class ClaudeApiProvider implements TranslationProvider {
     onProgress: (progress: StreamProgress) => void
   ): Promise<TranslationResult> {
     const prompt = this.buildTranslationPrompt(request);
-    
-    const response = await fetch(`${this.baseUrl}/messages`, {
-      method: 'POST',
-      headers: this.getHeaders(),
-      body: JSON.stringify({
-        model: request.model || CLAUDE_MODELS[0].id,
-        max_tokens: 8192,
-        stream: true,
-        messages: [{ role: 'user', content: prompt }],
-      }),
-    });
+
+    const response = await fetchWithTimeout(
+      `${this.baseUrl}/messages`,
+      {
+        method: 'POST',
+        headers: this.getHeaders(),
+        body: JSON.stringify({
+          model: request.model || CLAUDE_MODELS[0].id,
+          max_tokens: 8192,
+          stream: true,
+          messages: [{ role: 'user', content: prompt }],
+        }),
+      }
+    );
     
     this.updateRateLimitInfo(response);
     
