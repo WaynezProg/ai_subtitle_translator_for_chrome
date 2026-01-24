@@ -575,12 +575,13 @@ export class RealtimeTranslator {
    * This reveals the translation character by character based on progress through the cue,
    * reducing the perception of "time shift" compared to YouTube's progressive ASR display.
    *
-   * The reveal strategy:
-   * - 0-10% of cue duration: Show first 30% of text (quick start for context)
-   * - 10-90% of cue duration: Linearly reveal remaining 70% of text
-   * - 90-100% of cue duration: Show full text
+   * The reveal strategy (optimized for YouTube ASR):
+   * - 0-5% of cue duration: Show first 40% of text (fast start to reduce delay perception)
+   * - 5-80% of cue duration: Linearly reveal to 95% of text (steady progress)
+   * - 80-100% of cue duration: Show full text (ensure complete text shown before end)
    *
-   * This creates a reading experience that feels synchronized with speech.
+   * This creates a reading experience that feels synchronized with YouTube's
+   * word-by-word ASR display while showing translations progressively.
    */
   private calculateProgressiveReveal(
     cue: TranslatedCue,
@@ -590,8 +591,14 @@ export class RealtimeTranslator {
     const fullOriginal = cue.originalText;
     const duration = cue.endTime - cue.startTime;
 
-    // Edge case: very short or zero duration
+    // Edge case: very short or zero duration - show full text immediately
     if (duration <= 0) {
+      return { revealedTranslation: fullTranslation, revealedOriginal: fullOriginal };
+    }
+
+    // For very short cues (< 1 second), show full text immediately
+    // These are typically single words or brief phrases
+    if (duration < 1000) {
       return { revealedTranslation: fullTranslation, revealedOriginal: fullOriginal };
     }
 
@@ -599,21 +606,25 @@ export class RealtimeTranslator {
     const elapsed = currentTime - cue.startTime;
     const progress = Math.max(0, Math.min(1, elapsed / duration));
 
-    // Quick reveal strategy:
-    // - First 10% of time: reveal 30% of text (immediate context)
-    // - 10-90% of time: linearly reveal remaining 70%
-    // - Last 10%: full text shown
+    // Optimized reveal strategy for YouTube ASR subtitles:
+    // The key insight is that YouTube ASR shows words progressively as they're spoken,
+    // so our translation should appear to "keep up" with the original.
+    //
+    // Fast start (40% text at 5% time): Gives viewer context immediately
+    // Steady middle (40% → 95% text during 5% → 80% time): Matches speech pace
+    // Quick finish (full text at 80% time): Ensures complete reading before next cue
     let revealRatio: number;
-    if (progress <= 0.1) {
-      // Quick start: show 30% at 10% time progress
-      revealRatio = 0.3 * (progress / 0.1);
-    } else if (progress >= 0.9) {
-      // End: show all text
+    if (progress <= 0.05) {
+      // Fast start: show 40% of text within first 5% of time
+      // This reduces the initial "lag" perception
+      revealRatio = 0.4 * (progress / 0.05);
+    } else if (progress >= 0.8) {
+      // End: show all text to ensure complete reading
       revealRatio = 1;
     } else {
-      // Middle: linear reveal from 30% to 100%
-      const middleProgress = (progress - 0.1) / 0.8; // Normalize 0.1-0.9 to 0-1
-      revealRatio = 0.3 + (0.7 * middleProgress);
+      // Middle: linear reveal from 40% to 95%
+      const middleProgress = (progress - 0.05) / 0.75; // Normalize 0.05-0.8 to 0-1
+      revealRatio = 0.4 + (0.55 * middleProgress);
     }
 
     // Calculate characters to show (use character-based for CJK text)
@@ -674,12 +685,13 @@ export class RealtimeTranslator {
    * For ASR subtitles, we use an intelligent "grace period" approach:
    * - If currentTime is within a cue's time range, return that cue
    * - If currentTime is in a gap between cues:
-   *   - For short gaps (≤1000ms): extend previous cue display for up to 500ms
-   *   - For medium gaps (≤2000ms): extend previous cue for up to 300ms
+   *   - For very short gaps (≤500ms): extend previous cue for up to 400ms (seamless)
+   *   - For short gaps (500-1000ms): extend previous cue for up to 350ms
+   *   - For medium gaps (1000-1500ms): extend previous cue for up to 250ms
    *   - For longer gaps: show nothing (natural pause in speech)
    *
-   * This handles the varying gap lengths that occur after ASR consolidation,
-   * where sentence boundaries often create longer pauses than word boundaries.
+   * These values are optimized for YouTube ASR subtitles to reduce flickering
+   * while maintaining natural speech rhythm perception.
    */
   private findActiveCue(cues: TranslatedCue[], currentTime: number): TranslatedCue | null {
     if (cues.length === 0) return null;
@@ -705,15 +717,17 @@ export class RealtimeTranslator {
         const timeIntoGap = currentTime - gapStart;
 
         // Determine grace period based on gap duration
-        // Shorter gaps get longer grace periods (smoother viewing)
-        // Longer gaps get shorter grace periods (natural speech pauses)
+        // Optimized for YouTube ASR which has many small gaps between words
         let gracePeriod: number;
-        if (gapDuration <= 1000) {
-          // Short gap: likely brief pause within sentence, extend up to 500ms
-          gracePeriod = 500;
-        } else if (gapDuration <= 2000) {
-          // Medium gap: likely sentence boundary, extend up to 300ms
-          gracePeriod = 300;
+        if (gapDuration <= 500) {
+          // Very short gap: nearly seamless transition
+          gracePeriod = 400;
+        } else if (gapDuration <= 1000) {
+          // Short gap: likely brief pause, extend up to 350ms
+          gracePeriod = 350;
+        } else if (gapDuration <= 1500) {
+          // Medium gap: likely sentence boundary, extend up to 250ms
+          gracePeriod = 250;
         } else {
           // Long gap: intentional pause, don't extend (show nothing)
           gracePeriod = 0;

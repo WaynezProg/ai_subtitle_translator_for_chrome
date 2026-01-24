@@ -155,9 +155,13 @@ export function createSubtitleRenderer(): SubtitleRenderer {
    * Find the active cue at the given time
    *
    * Uses intelligent gap handling to prevent subtitle flickering:
-   * - Short gaps (≤1000ms): Extend previous cue for up to 500ms
-   * - Medium gaps (1000-2000ms): Extend previous cue for up to 300ms
-   * - Long gaps (>2000ms): No extension (intentional pause)
+   * - Very short gaps (≤500ms): Extend previous cue for up to 400ms (seamless transition)
+   * - Short gaps (500-1000ms): Extend previous cue for up to 350ms
+   * - Medium gaps (1000-1500ms): Extend previous cue for up to 250ms
+   * - Long gaps (>1500ms): No extension (intentional pause in speech)
+   *
+   * These values are optimized for YouTube ASR subtitles where word-by-word
+   * display creates many small gaps that shouldn't cause flickering.
    */
   function findActiveCue(time: number): Cue | null {
     // Binary search for efficiency with many cues
@@ -193,13 +197,16 @@ export function createSubtitleRenderer(): SubtitleRenderer {
         const timeIntoGap = time - gapStart;
 
         // Determine grace period based on gap duration
+        // Optimized for YouTube ASR which has many small gaps between words
         let gracePeriod: number;
-        if (gapDuration <= 1000) {
-          gracePeriod = 500;  // Short gap: extend 500ms
-        } else if (gapDuration <= 2000) {
-          gracePeriod = 300;  // Medium gap: extend 300ms
+        if (gapDuration <= 500) {
+          gracePeriod = 400;  // Very short gap: nearly seamless transition
+        } else if (gapDuration <= 1000) {
+          gracePeriod = 350;  // Short gap: extend 350ms
+        } else if (gapDuration <= 1500) {
+          gracePeriod = 250;  // Medium gap: extend 250ms
         } else {
-          gracePeriod = 0;    // Long gap: no extension
+          gracePeriod = 0;    // Long gap: no extension (intentional pause)
         }
 
         // If within grace period, return the previous cue

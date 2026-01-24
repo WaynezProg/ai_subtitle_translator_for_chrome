@@ -76,6 +76,30 @@ The extension uses two content scripts that run in different worlds:
 
 Tests use Vitest with `fake-indexeddb` for IndexedDB mocking and custom Chrome API mocks defined in `tests/setup.ts`.
 
+### ASR Subtitle Optimization
+
+The extension includes specialized handling for YouTube's auto-generated (ASR) subtitles:
+
+**ASR Consolidator** (`src/shared/utils/asr-consolidator.ts`):
+- Consolidates fragmented word-by-word segments into logical sentences
+- Uses `timingStrategy: 'first'` to show translations when speech begins
+- Optimized parameters: `maxGapMs: 1200`, `maxDurationMs: 6000`
+
+**Progressive Reveal** (`src/content/realtime-translator.ts`):
+- Gradually reveals translation text to match YouTube's word-by-word display
+- Fast start (40% text at 5% time) reduces perceived delay
+- Ensures full text is shown by 80% of cue duration
+
+**Gap Handling** (both `subtitle-renderer.ts` and `realtime-translator.ts`):
+- Very short gaps (≤500ms): 400ms grace period
+- Short gaps (500-1000ms): 350ms grace period
+- Medium gaps (1000-1500ms): 250ms grace period
+- Prevents subtitle flickering during natural speech pauses
+
+### Default Language
+
+The default target language is **Traditional Chinese (zh-TW)**. This can be changed in the extension settings.
+
 <!-- OPENSPEC:START -->
 # OpenSpec Instructions
 

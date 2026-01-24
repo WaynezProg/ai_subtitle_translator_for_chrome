@@ -82,12 +82,17 @@ export interface ASRConsolidationOptions {
  * sentence appears at the moment the speaker begins the phrase. The endTime
  * extends to the last word's endTime to ensure the subtitle stays visible
  * for the full duration of speech.
+ *
+ * OPTIMIZATION NOTES (YouTube ASR):
+ * - maxGapMs: 1200ms (reduced from 1500ms) to create more natural sentence breaks
+ * - maxDurationMs: 6000ms (reduced from 8000ms) for better readability
+ * - These values balance between too-fragmented (hard to read) and too-long (timing mismatch)
  */
 const DEFAULT_OPTIONS: Required<ASRConsolidationOptions> = {
-  maxGapMs: 1500,
-  maxDurationMs: 8000,
+  maxGapMs: 1200,           // Reduced: creates more natural sentence breaks
+  maxDurationMs: 6000,      // Reduced: shorter sentences for better timing alignment
   minCharsForSentence: 5,
-  sentenceEndChars: ['.', '!', '?', '。', '！', '？', '…', '；', ';'],
+  sentenceEndChars: ['.', '!', '?', '。', '！', '？', '…', '；', ';', ',', '，'],  // Added comma for better breaks
   timingStrategy: 'first',  // Shows translation when speech begins (recommended for ASR)
 };
 
