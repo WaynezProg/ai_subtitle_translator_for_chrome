@@ -390,7 +390,7 @@ export class YouTubeAdapter implements PlatformAdapter {
       async?: boolean,
       username?: string | null,
       password?: string | null
-    ) {
+    ): void {
       // Safety check: if originalXHROpen is gone, we can't proceed safely
       const xhrOpen = adapter.originalXHROpen;
       if (!xhrOpen) {

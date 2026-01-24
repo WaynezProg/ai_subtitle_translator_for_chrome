@@ -8,6 +8,9 @@
 
 import type { Platform } from '../shared/types/subtitle';
 import type { RenderOptions } from './adapters/types';
+import { createLogger } from '../shared/utils/logger';
+
+const log = createLogger('RealtimeTranslator');
 
 // ============================================================================
 // Types
@@ -197,7 +200,7 @@ export class RealtimeTranslator {
   setTimeOffset(offsetMs: number): void {
     this.timeOffset = offsetMs;
     this.timeOffsetCalibrated = true;
-    console.log(`[RealtimeTranslator] Time offset set to ${offsetMs}ms`);
+    log.debug(` Time offset set to ${offsetMs}ms`);
     // Force update with new offset
     this.onTimeUpdateImmediate();
   }
@@ -256,7 +259,7 @@ export class RealtimeTranslator {
     // Force refresh to show changes
     this.refreshCurrentCue();
 
-    console.log('[RealtimeTranslator] Render options updated:', options);
+    log.debug('Render options updated:', options);
   }
   
   /**
@@ -266,7 +269,7 @@ export class RealtimeTranslator {
    */
   updateTranslatedCues(cues: TranslatedCue[]): void {
     this.options.translatedCues = cues;
-    console.log(`[RealtimeTranslator] Updated translated cues: ${cues.length} cues`);
+    log.debug(` Updated translated cues: ${cues.length} cues`);
   }
   
   /**
@@ -310,7 +313,7 @@ export class RealtimeTranslator {
     // If first cue starts very late (> 30 seconds), it might indicate an offset issue
     // Netflix sometimes has credits/intro that aren't in subtitles
     if (firstCueStart > 30000) {
-      console.log(`[RealtimeTranslator] First cue starts at ${firstCueStart}ms - may need offset adjustment`);
+      log.debug(` First cue starts at ${firstCueStart}ms - may need offset adjustment`);
     }
     
     this.timeOffsetCalibrated = true;
@@ -321,11 +324,11 @@ export class RealtimeTranslator {
    */
   start(): void {
     if (this.state === 'active') {
-      console.log('[RealtimeTranslator] Already active');
+      log.debug('Already active');
       return;
     }
     
-    console.log('[RealtimeTranslator] Starting...');
+    log.debug('Starting...');
     this.state = 'active';
     
     // Inject styles
@@ -341,10 +344,10 @@ export class RealtimeTranslator {
     
     // Choose mode based on whether we have pre-translated cues
     if (this.options.translatedCues && this.options.translatedCues.length > 0) {
-      console.log('[RealtimeTranslator] Using time-sync mode with', this.options.translatedCues.length, 'cues');
+      log.debug(`Using time-sync mode with ${this.options.translatedCues.length} cues`);
       this.startTimeSyncMode();
     } else {
-      console.log('[RealtimeTranslator] Using DOM observer mode');
+      log.debug('Using DOM observer mode');
       this.startObserverMode();
     }
   }
@@ -353,7 +356,7 @@ export class RealtimeTranslator {
    * Stop the translator
    */
   stop(): void {
-    console.log('[RealtimeTranslator] Stopping...');
+    log.debug('Stopping...');
     this.state = 'idle';
     
     // Stop time sync
@@ -384,6 +387,9 @@ export class RealtimeTranslator {
     this.lastDisplayedCueStart = -1;
     this.lastProgressiveLength = 0;
     this.cache = {};
+
+    // Clear translated cues reference to allow garbage collection
+    this.options.translatedCues = undefined;
   }
   
   /**
@@ -406,10 +412,10 @@ export class RealtimeTranslator {
     }
     
     // Throttled handler for regular time updates (performance optimization)
-    this.timeUpdateHandler = () => this.onTimeUpdateThrottled();
-    
+    this.timeUpdateHandler = (): void => this.onTimeUpdateThrottled();
+
     // Immediate handler for seek events (responsive UX)
-    this.seekHandler = () => this.onTimeUpdateImmediate();
+    this.seekHandler = (): void => this.onTimeUpdateImmediate();
     
     // Regular time updates - throttled for performance
     this.videoElement.addEventListener('timeupdate', this.timeUpdateHandler);
@@ -423,7 +429,7 @@ export class RealtimeTranslator {
     // Immediately update to current position
     this.onTimeUpdateImmediate();
     
-    console.log('[RealtimeTranslator] Time-sync mode started');
+    log.debug('Time-sync mode started');
   }
   
   private stopTimeSyncMode(): void {
@@ -753,7 +759,7 @@ export class RealtimeTranslator {
     const container = this.findCaptionContainer();
     
     if (!container) {
-      console.log('[RealtimeTranslator] Caption container not found, will retry...');
+      log.debug('Caption container not found, will retry...');
       setTimeout(() => {
         if (this.state === 'active') {
           this.startObserverMode();
@@ -762,7 +768,7 @@ export class RealtimeTranslator {
       return;
     }
     
-    console.log('[RealtimeTranslator] Caption container found');
+    log.debug('Caption container found');
     
     this.observer = new MutationObserver(() => {
       if (this.state === 'active') {
@@ -940,7 +946,7 @@ export class RealtimeTranslator {
     for (const selector of playerSelectors) {
       player = document.querySelector(selector);
       if (player) {
-        console.log('[RealtimeTranslator] Found player container:', selector);
+        log.debug(`Found player container: ${selector}`);
         break;
       }
     }
@@ -963,7 +969,7 @@ export class RealtimeTranslator {
     // This allows users to see both native progressive subtitles and our translation
     if (!this.options.hideNativeSubtitles) {
       this.overlayElement.classList.add('ai-subtitle-overlay-above-native');
-      console.log('[RealtimeTranslator] Native subtitles visible, positioning overlay above');
+      log.debug('Native subtitles visible, positioning overlay above');
     }
 
     // Ensure parent has position for absolute positioning
@@ -973,7 +979,7 @@ export class RealtimeTranslator {
     }
 
     player.appendChild(this.overlayElement);
-    console.log('[RealtimeTranslator] Overlay created and attached');
+    log.debug('Overlay created and attached');
   }
   
   private removeOverlay(): void {

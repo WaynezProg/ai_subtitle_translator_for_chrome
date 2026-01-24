@@ -188,7 +188,7 @@ export async function retry<T>(
     maxAttempts = 3,
     baseDelay = 1000,
     maxDelay = 30000,
-    shouldRetry = () => true,
+    shouldRetry = (): boolean => true,
   } = options;
   
   let lastError: unknown;

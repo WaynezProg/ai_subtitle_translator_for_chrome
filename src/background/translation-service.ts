@@ -27,7 +27,8 @@ import { ProviderFactory } from '../shared/providers/factory';
 import { TRANSLATION_CONFIG } from '../shared/utils/constants';
 import { generateId, retry } from '../shared/utils/helpers';
 import { sendToTab } from './message-handler';
-import { cacheManager, createCacheKey, type CacheResult } from '../shared/cache';
+import { cacheManager, createCacheKey, type CacheResult, type CacheManagerStats } from '../shared/cache';
+import type { TranslationCache } from '../shared/types/translation';
 import { createLogger } from '../shared/utils/logger';
 
 const log = createLogger('TranslationService');
@@ -646,14 +647,14 @@ export class TranslationService {
   /**
    * Get cache statistics
    */
-  async getCacheStats() {
+  async getCacheStats(): Promise<CacheManagerStats> {
     return cacheManager.getStats();
   }
-  
+
   /**
    * Get all cached entries
    */
-  async getCachedEntries() {
+  async getCachedEntries(): Promise<TranslationCache[]> {
     return cacheManager.getAll();
   }
   

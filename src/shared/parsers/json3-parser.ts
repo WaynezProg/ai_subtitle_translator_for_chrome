@@ -116,10 +116,6 @@ export function parseJSON3(content: string, options?: JSON3ParseOptions): JSON3P
   const cues: Cue[] = [];
   let cueIndex = 0;
   
-  // For ASR: don't track lastEndTime to avoid time compression
-  // For manual: track to handle overlapping cues
-  let lastEndTime = 0;
-  
   for (const event of data.events) {
     // Skip events without text segments
     if (!event.segs || event.segs.length === 0) {
@@ -172,8 +168,6 @@ export function parseJSON3(content: string, options?: JSON3ParseOptions): JSON3P
       endTime,    // Always use original endTime
       text
     });
-
-    lastEndTime = endTime;
   }
 
   // IMPORTANT: Skip merging to preserve original timing granularity
@@ -243,44 +237,6 @@ function detectASRFromData(data: JSON3Response): boolean {
   
   return false;
 }
-
-/**
- * Merge consecutive cues with identical or very similar text
- * YouTube sometimes splits text across multiple events for karaoke effect
- */
-function mergeDuplicateCues(cues: Cue[]): Cue[] {
-  if (cues.length === 0) return cues;
-  
-  const merged: Cue[] = [];
-  let current = cues[0];
-  
-  for (let i = 1; i < cues.length; i++) {
-    const next = cues[i];
-    
-    // Merge if:
-    // 1. Text is identical or current is prefix of next
-    // 2. Time gap is small (< 100ms)
-    const isSameText = current.text === next.text;
-    const isPrefix = next.text.startsWith(current.text) && next.text.length <= current.text.length * 1.5;
-    const isClose = next.startTime - current.endTime < 100;
-    
-    if ((isSameText || isPrefix) && isClose) {
-      // Extend current cue
-      current = {
-        ...current,
-        endTime: next.endTime,
-        text: next.text.length > current.text.length ? next.text : current.text
-      };
-    } else {
-      merged.push(current);
-      current = next;
-    }
-  }
-  
-  merged.push(current);
-  return merged;
-}
-
 /**
  * Validate JSON3 content
  */

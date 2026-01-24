@@ -10,15 +10,19 @@
  */
 
 // Simple logging that works in isolated world (can't use shared logger due to isolation)
+// ESLint only allows console.warn and console.error
 const bridgeLog = {
+  // Debug messages go to warn in production (bridge should have minimal logging)
   debug: (msg: string): void => {
-    if (typeof console !== 'undefined') console.debug(`[Bridge] ${msg}`);
+    if (process.env.NODE_ENV !== 'production') {
+      console.warn(`[Bridge:Debug] ${msg}`);
+    }
   },
   warn: (msg: string, error?: unknown): void => {
-    if (typeof console !== 'undefined') console.warn(`[Bridge] ${msg}`, error || '');
+    console.warn(`[Bridge] ${msg}`, error || '');
   },
   error: (msg: string, error?: unknown): void => {
-    if (typeof console !== 'undefined') console.error(`[Bridge] ${msg}`, error || '');
+    console.error(`[Bridge] ${msg}`, error || '');
   },
 };
 

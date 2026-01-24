@@ -54,7 +54,7 @@ import { parseJSON3 } from '../shared/parsers/json3-parser';
 import { createSubtitleRenderer, SubtitleRenderer } from './subtitle-renderer';
 import { getPreferencesFromBridge, getAuthConfigFromBridge } from './storage-bridge';
 import { downloadSubtitleAsSRT } from '../shared/utils/subtitle-download';
-import { parseSRT } from '../shared/parsers/srt-parser';
+// parseSRT is available via parseSubtitleByFormat when needed
 import { detectSubtitleFormat, parseSubtitle as parseSubtitleByFormat } from '../shared/parsers';
 import type { SRTGenerationMode } from '../shared/utils/srt-generator';
 import type { SubtitleState, SubtitleOption } from './ui/settings-panel';
@@ -461,7 +461,7 @@ function handleSettingsClick(): void {
   
   // Fetch subtitles and update state asynchronously when panel is shown
   if (settingsPanel.isVisible()) {
-    void (async () => {
+    void (async (): Promise<void> => {
       const state = await getSubtitleStateAsync();
       settingsPanel?.updateSubtitleState(state);
     })();
@@ -638,14 +638,14 @@ async function handleSubtitleSelect(subtitleId: string): Promise<void> {
 function readFileAsText(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => {
+    reader.onload = (): void => {
       if (typeof reader.result === 'string') {
         resolve(reader.result);
       } else {
         reject(new Error('Failed to read file as text'));
       }
     };
-    reader.onerror = () => reject(new Error('Error reading file'));
+    reader.onerror = (): void => reject(new Error('Error reading file'));
     reader.readAsText(file, 'UTF-8');
   });
 }

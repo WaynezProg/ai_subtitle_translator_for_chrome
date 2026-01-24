@@ -107,18 +107,18 @@ export class L2IndexedDBCache {
     return new Promise((resolve, reject) => {
       const request = indexedDB.open(this.dbName, this.dbVersion);
       
-      request.onerror = () => {
+      request.onerror = (): void => {
         console.error('[L2Cache] Failed to open database:', request.error);
         reject(request.error);
       };
       
-      request.onsuccess = () => {
+      request.onsuccess = (): void => {
         this.db = request.result;
         console.log('[L2Cache] Database opened successfully');
         resolve();
       };
       
-      request.onupgradeneeded = (event) => {
+      request.onupgradeneeded = (event): void => {
         const db = (event.target as IDBOpenDBRequest).result;
         this.createSchema(db);
       };
@@ -159,12 +159,12 @@ export class L2IndexedDBCache {
       const store = transaction.objectStore(this.storeName);
       const request = store.get(serialized);
       
-      request.onerror = () => {
+      request.onerror = (): void => {
         console.error('[L2Cache] Get failed:', request.error);
         reject(request.error);
       };
       
-      request.onsuccess = () => {
+      request.onsuccess = (): void => {
         const entry = request.result as StoredCacheEntry | undefined;
         
         if (!entry) {
@@ -195,12 +195,12 @@ export class L2IndexedDBCache {
       const store = transaction.objectStore(this.storeName);
       const request = store.count(IDBKeyRange.only(serialized));
       
-      request.onerror = () => {
+      request.onerror = (): void => {
         console.error('[L2Cache] Has check failed:', request.error);
         reject(request.error);
       };
       
-      request.onsuccess = () => {
+      request.onsuccess = (): void => {
         resolve(request.result > 0);
       };
     });
@@ -238,12 +238,12 @@ export class L2IndexedDBCache {
       const store = transaction.objectStore(this.storeName);
       const request = store.put(entry);
       
-      request.onerror = () => {
+      request.onerror = (): void => {
         console.error('[L2Cache] Set failed:', request.error);
         reject(request.error);
       };
       
-      request.onsuccess = () => {
+      request.onsuccess = (): void => {
         resolve();
       };
     });
@@ -262,12 +262,12 @@ export class L2IndexedDBCache {
       const store = transaction.objectStore(this.storeName);
       const request = store.delete(serialized);
       
-      request.onerror = () => {
+      request.onerror = (): void => {
         console.error('[L2Cache] Delete failed:', request.error);
         reject(request.error);
       };
       
-      request.onsuccess = () => {
+      request.onsuccess = (): void => {
         resolve(true);
       };
     });
@@ -287,12 +287,12 @@ export class L2IndexedDBCache {
       
       let deleted = 0;
       
-      request.onerror = () => {
+      request.onerror = (): void => {
         console.error('[L2Cache] Delete by videoId failed:', request.error);
         reject(request.error);
       };
       
-      request.onsuccess = () => {
+      request.onsuccess = (): void => {
         const cursor = request.result;
         if (cursor) {
           cursor.delete();
@@ -316,12 +316,12 @@ export class L2IndexedDBCache {
       const store = transaction.objectStore(this.storeName);
       const request = store.clear();
       
-      request.onerror = () => {
+      request.onerror = (): void => {
         console.error('[L2Cache] Clear failed:', request.error);
         reject(request.error);
       };
       
-      request.onsuccess = () => {
+      request.onsuccess = (): void => {
         resolve();
       };
     });
@@ -342,12 +342,12 @@ export class L2IndexedDBCache {
       const store = transaction.objectStore(this.storeName);
       const request = store.getAll();
       
-      request.onerror = () => {
+      request.onerror = (): void => {
         console.error('[L2Cache] GetAll failed:', request.error);
         reject(request.error);
       };
       
-      request.onsuccess = () => {
+      request.onsuccess = (): void => {
         const entries = request.result as StoredCacheEntry[];
         resolve(entries.map(entry => ({
           key: entry.keyComponents,
@@ -372,12 +372,12 @@ export class L2IndexedDBCache {
       const store = transaction.objectStore(this.storeName);
       const request = store.getAll();
       
-      request.onerror = () => {
+      request.onerror = (): void => {
         console.error('[L2Cache] GetKeys failed:', request.error);
         reject(request.error);
       };
       
-      request.onsuccess = () => {
+      request.onsuccess = (): void => {
         const entries = request.result as StoredCacheEntry[];
         resolve(entries.map(entry => entry.keyComponents));
       };
@@ -396,12 +396,12 @@ export class L2IndexedDBCache {
       const index = store.index('videoId');
       const request = index.getAll(IDBKeyRange.only(videoId));
       
-      request.onerror = () => {
+      request.onerror = (): void => {
         console.error('[L2Cache] GetByVideoId failed:', request.error);
         reject(request.error);
       };
       
-      request.onsuccess = () => {
+      request.onsuccess = (): void => {
         const entries = request.result as StoredCacheEntry[];
         resolve(entries.map(entry => ({
           key: entry.keyComponents,
@@ -430,12 +430,12 @@ export class L2IndexedDBCache {
       const store = transaction.objectStore(this.storeName);
       const request = store.count();
       
-      request.onerror = () => {
+      request.onerror = (): void => {
         console.error('[L2Cache] Count failed:', request.error);
         reject(request.error);
       };
       
-      request.onsuccess = () => {
+      request.onsuccess = (): void => {
         resolve(request.result);
       };
     });
@@ -477,12 +477,12 @@ export class L2IndexedDBCache {
       const request = index.openCursor();
       let evicted = 0;
       
-      request.onerror = () => {
+      request.onerror = (): void => {
         console.error('[L2Cache] LRU eviction failed:', request.error);
         reject(request.error);
       };
       
-      request.onsuccess = () => {
+      request.onsuccess = (): void => {
         const cursor = request.result;
         if (cursor && evicted < countToEvict) {
           const entry = cursor.value as StoredCacheEntry;
@@ -514,12 +514,12 @@ export class L2IndexedDBCache {
       const request = index.openCursor(IDBKeyRange.upperBound(cutoff));
       let evicted = 0;
       
-      request.onerror = () => {
+      request.onerror = (): void => {
         console.error('[L2Cache] Expired eviction failed:', request.error);
         reject(request.error);
       };
       
-      request.onsuccess = () => {
+      request.onsuccess = (): void => {
         const cursor = request.result;
         if (cursor) {
           cursor.delete();
@@ -557,12 +557,12 @@ export class L2IndexedDBCache {
     return new Promise((resolve, reject) => {
       const request = indexedDB.deleteDatabase(this.dbName);
       
-      request.onerror = () => {
+      request.onerror = (): void => {
         console.error('[L2Cache] Database deletion failed:', request.error);
         reject(request.error);
       };
       
-      request.onsuccess = () => {
+      request.onsuccess = (): void => {
         console.log('[L2Cache] Database deleted');
         resolve();
       };

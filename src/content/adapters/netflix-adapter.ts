@@ -311,13 +311,13 @@ export class NetflixAdapter implements PlatformAdapter {
       return () => {};
     }
     
-    const handlers = {
-      play: () => callback({ type: 'play' }),
-      pause: () => callback({ type: 'pause' }),
-      seeked: () => callback({ type: 'seeked', currentTime: video.currentTime }),
-      timeupdate: () => callback({ type: 'timeupdate', currentTime: video.currentTime }),
-      ended: () => callback({ type: 'ended' }),
-      ratechange: () => callback({ type: 'ratechange', playbackRate: video.playbackRate }),
+    const handlers: Record<string, () => void> = {
+      play: (): void => callback({ type: 'play' }),
+      pause: (): void => callback({ type: 'pause' }),
+      seeked: (): void => callback({ type: 'seeked', currentTime: video.currentTime }),
+      timeupdate: (): void => callback({ type: 'timeupdate', currentTime: video.currentTime }),
+      ended: (): void => callback({ type: 'ended' }),
+      ratechange: (): void => callback({ type: 'ratechange', playbackRate: video.playbackRate }),
     };
     
     for (const [event, handler] of Object.entries(handlers)) {

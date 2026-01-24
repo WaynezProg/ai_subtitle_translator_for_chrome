@@ -78,7 +78,7 @@ export function readFileAsText(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
 
-    reader.onload = () => {
+    reader.onload = (): void => {
       if (typeof reader.result === 'string') {
         resolve(reader.result);
       } else {
@@ -86,7 +86,7 @@ export function readFileAsText(file: File): Promise<string> {
       }
     };
 
-    reader.onerror = () => {
+    reader.onerror = (): void => {
       reject(new SubtitleUploadError('FILE_READ_ERROR', 'Error reading file'));
     };
 
