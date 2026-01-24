@@ -71,13 +71,24 @@ export interface ASRConsolidationOptions {
 
 /**
  * Default consolidation options
+ *
+ * TIMING STRATEGY RATIONALE:
+ * For ASR (Auto-generated) subtitles, 'first' is the recommended default because:
+ * 1. Users expect translations to appear when the speaker STARTS talking
+ * 2. This allows reading ahead while listening to the audio
+ * 3. The 'weighted' strategy delays display, causing perceived lag
+ *
+ * The 'first' strategy uses the first word's startTime, so the full translated
+ * sentence appears at the moment the speaker begins the phrase. The endTime
+ * extends to the last word's endTime to ensure the subtitle stays visible
+ * for the full duration of speech.
  */
 const DEFAULT_OPTIONS: Required<ASRConsolidationOptions> = {
   maxGapMs: 1500,
   maxDurationMs: 8000,
   minCharsForSentence: 5,
   sentenceEndChars: ['.', '!', '?', '。', '！', '？', '…', '；', ';'],
-  timingStrategy: 'first',
+  timingStrategy: 'first',  // Shows translation when speech begins (recommended for ASR)
 };
 
 /**

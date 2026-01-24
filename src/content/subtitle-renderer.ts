@@ -153,27 +153,63 @@ export function createSubtitleRenderer(): SubtitleRenderer {
   
   /**
    * Find the active cue at the given time
+   *
+   * Uses intelligent gap handling to prevent subtitle flickering:
+   * - Short gaps (≤1000ms): Extend previous cue for up to 500ms
+   * - Medium gaps (1000-2000ms): Extend previous cue for up to 300ms
+   * - Long gaps (>2000ms): No extension (intentional pause)
    */
   function findActiveCue(time: number): Cue | null {
     // Binary search for efficiency with many cues
     let left = 0;
     let right = cues.length - 1;
-    
+
     while (left <= right) {
       const mid = Math.floor((left + right) / 2);
       const cue = cues[mid];
-      
+
       if (time >= cue.startTime && time < cue.endTime) {
         return cue;
       }
-      
+
       if (time < cue.startTime) {
         right = mid - 1;
       } else {
         left = mid + 1;
       }
     }
-    
+
+    // No exact match found - check for gap handling
+    // Find the cue just before the current time
+    for (let i = 0; i < cues.length - 1; i++) {
+      const currentCue = cues[i];
+      const nextCue = cues[i + 1];
+      const gapStart = currentCue.endTime;
+      const gapEnd = nextCue.startTime;
+
+      // Check if time is in the gap between two cues
+      if (time >= gapStart && time < gapEnd) {
+        const gapDuration = gapEnd - gapStart;
+        const timeIntoGap = time - gapStart;
+
+        // Determine grace period based on gap duration
+        let gracePeriod: number;
+        if (gapDuration <= 1000) {
+          gracePeriod = 500;  // Short gap: extend 500ms
+        } else if (gapDuration <= 2000) {
+          gracePeriod = 300;  // Medium gap: extend 300ms
+        } else {
+          gracePeriod = 0;    // Long gap: no extension
+        }
+
+        // If within grace period, return the previous cue
+        if (gracePeriod > 0 && timeIntoGap <= gracePeriod) {
+          return currentCue;
+        }
+        break;
+      }
+    }
+
     return null;
   }
   
