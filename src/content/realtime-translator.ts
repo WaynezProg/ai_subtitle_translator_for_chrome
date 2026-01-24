@@ -537,15 +537,46 @@ export class RealtimeTranslator {
    * Find active cue using linear search for reliability
    * Linear search is more reliable when cues may have overlapping times or gaps
    * For typical subtitle files (~500 cues), performance is acceptable
+   *
+   * For ASR subtitles, we use a "grace period" approach:
+   * - If currentTime is within a cue's time range, return that cue
+   * - If currentTime is in a gap between cues, extend the previous cue's display
+   *   to bridge small gaps (up to 500ms) for smoother viewing experience
    */
   private findActiveCue(cues: TranslatedCue[], currentTime: number): TranslatedCue | null {
-    // Use linear search to find the cue whose time range contains currentTime
-    // This is more reliable than binary search when timing may have gaps or overlaps
+    if (cues.length === 0) return null;
+
+    // First pass: find exact match
     for (const cue of cues) {
       if (currentTime >= cue.startTime && currentTime < cue.endTime) {
         return cue;
       }
     }
+
+    // Second pass: handle gaps between cues for smoother display
+    // This prevents subtitle "flicker" during small time gaps in ASR content
+    const GAP_GRACE_PERIOD_MS = 500; // Extend previous cue display for up to 500ms
+
+    for (let i = 0; i < cues.length - 1; i++) {
+      const currentCue = cues[i];
+      const nextCue = cues[i + 1];
+      const gapStart = currentCue.endTime;
+      const gapEnd = nextCue.startTime;
+
+      // Check if currentTime is in the gap between two cues
+      if (currentTime >= gapStart && currentTime < gapEnd) {
+        const gapDuration = gapEnd - gapStart;
+        const timeIntoGap = currentTime - gapStart;
+
+        // If gap is small and we're still in the grace period, show previous cue
+        if (gapDuration <= GAP_GRACE_PERIOD_MS * 2 && timeIntoGap <= GAP_GRACE_PERIOD_MS) {
+          return currentCue;
+        }
+        // If we're closer to the next cue, show nothing (let it appear naturally)
+        break;
+      }
+    }
+
     return null;
   }
   
