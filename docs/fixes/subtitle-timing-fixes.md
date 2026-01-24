@@ -583,7 +583,7 @@ npm test
 
 ### 測試覆蓋
 
-- 總測試數：377 個
+- 總測試數：379 個
 - ASR 合併測試：21 個
 - 間隙處理測試：13 個（更新以測試智能間隙處理）
 - 時間策略測試：4 個
@@ -723,7 +723,7 @@ private revealTextProgressively(text: string, targetLength: number): string {
 ```bash
 npm test
 # Test Files  16 passed (16)
-# Tests  377 passed (377)   # 新增 9 個漸進式顯示測試
+# Tests  379 passed (379)   # 新增 9 個漸進式顯示測試
 ```
 
 ---
@@ -852,7 +852,7 @@ if (duration < 1000) {
 
 ```bash
 npm run typecheck  # 通過
-npm run test:unit  # 377 測試全數通過
+npm run test:unit  # 379 測試全數通過
 ```
 
 ### 相關檔案修改
