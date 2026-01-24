@@ -1004,9 +1004,17 @@ async function startRealtimeTranslation(targetLanguage: string): Promise<void> {
 }
 
 /**
- * Find the cue index closest to the current video playback position
- * This helps prioritize translating cues near what the user is watching
- * Returns the cue.index value, which should match the array position for properly indexed cues
+ * Find the cue index closest to the current video playback position using binary search.
+ *
+ * This function is used to prioritize translation batches, ensuring that cues near
+ * the user's current viewing position are translated first for a better experience.
+ *
+ * @param cues - Array of subtitle cues sorted by startTime
+ * @returns The cue.index value of the cue closest to current playback time, or 0 if no video/cues
+ *
+ * @remarks
+ * Uses binary search (O(log n)) for efficient lookup in large subtitle files.
+ * Returns cue.index (not array position) to maintain consistency with batch processing.
  */
 function findCurrentCueIndex(cues: Cue[]): number {
   const video = currentAdapter?.getVideoElement();
@@ -1033,8 +1041,20 @@ function findCurrentCueIndex(cues: Cue[]): number {
 }
 
 /**
- * Order batches by priority: start from current playback position, then expand outward
- * This ensures the user sees translations for what they're currently watching first
+ * Order translation batches by priority based on current playback position.
+ *
+ * This function reorders batches so that translations are prioritized for the content
+ * the user is currently watching, then expands outward to cover earlier and later content.
+ *
+ * @example
+ * // If user is watching cue 25 with batchSize=10:
+ * // Batch order: [batch2 (cues 20-29), batch3 (30-39), batch1 (10-19), batch4 (40-49), batch0 (0-9)]
+ *
+ * @template T - Batch type that must have cueIndices array
+ * @param batches - Array of translation batches to reorder
+ * @param currentCueIndex - The cue index at current video playback position
+ * @param batchSize - Number of cues per batch (used to calculate which batch is current)
+ * @returns Reordered array of batches with current batch first, then alternating forward/backward
  */
 function orderBatchesByPriority<T extends { cueIndices: number[] }>(batches: T[], currentCueIndex: number, batchSize: number): T[] {
   if (batches.length === 0) return batches;
