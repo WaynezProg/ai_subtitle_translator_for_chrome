@@ -6,9 +6,26 @@
 
 ## 目錄
 
-1. [Ralph Loop Session - 2026-01-26](#ralph-loop-session---2026-01-26)
-2. [字幕時間對齊修復](#字幕時間對齊修復)
-3. [核心架構改進](#核心架構改進)
+1. [Bug Fix - 2026-01-26](#bug-fix---2026-01-26)
+2. [Ralph Loop Session - 2026-01-26](#ralph-loop-session---2026-01-26)
+3. [字幕時間對齊修復](#字幕時間對齊修復)
+4. [核心架構改進](#核心架構改進)
+
+---
+
+# Bug Fix - 2026-01-26
+
+## smartConsolidateASRCues 修復
+
+**問題**：`smartConsolidateASRCues` 函數在之前的優化過程中被修改為總是對自動生成字幕進行整合，移除了 `isFragmentedASR` 檢查。這導致已經整合過的字幕會被重複處理。
+
+**修復**：恢復 `isFragmentedASR` 檢查，確保只有在以下兩個條件都滿足時才進行整合：
+1. 字幕是自動生成的（ASR）
+2. 內容呈現碎片化特徵（短段落、短時長）
+
+**影響檔案**：`src/shared/utils/asr-consolidator.ts`
+
+**測試驗證**：21 個測試全部通過
 
 ---
 
