@@ -102,16 +102,6 @@ const SUBTITLE_STYLES = `
     font-weight: 600;
   }
 
-  /* Smooth text reveal using clip-path animation */
-  .ai-subtitle-translated {
-    display: inline;
-  }
-
-  .ai-subtitle-reveal-mask {
-    display: inline;
-    /* clip-path will be animated via JavaScript for smooth reveal */
-  }
-
   /* Hide YouTube native subtitles when our translator is active */
   .ai-subtitle-hide-native .ytp-caption-window-container,
   .ai-subtitle-hide-native .caption-window {
@@ -518,12 +508,11 @@ export class RealtimeTranslator {
       if (cueChanged || textChanged) {
         this.lastDisplayedText = activeCue.translatedText;
         this.lastDisplayedCueStart = activeCue.startTime;
-        const cueDuration = activeCue.endTime - activeCue.startTime;
         this.updateOverlaySimple(
           activeCue.originalText,
           activeCue.translatedText,
-          cueChanged,  // trigger typewriter animation on cue change
-          cueDuration
+          activeCue.startTime,
+          activeCue.endTime
         );
       }
     } else {
@@ -1337,26 +1326,26 @@ export class RealtimeTranslator {
     this.stopRevealAnimation();
   }
 
-  // Animation state for smooth reveal
+  // Animation state for smooth reveal (using video time, not wall-clock)
   private revealAnimationId: number | null = null;
-  private revealStartTime: number = 0;
-  private revealDuration: number = 0;
+  private revealCueStartTime: number = 0;  // Cue start time in video (ms)
+  private revealCueEndTime: number = 0;    // Cue end time in video (ms)
   private currentRevealProgress: number = 1; // 0 to 1
 
   /**
    * Simple overlay update with smooth progressive reveal.
-   * Uses requestAnimationFrame for buttery-smooth character reveal.
+   * Uses video time for animation sync (handles seeking and playback speed).
    *
    * @param originalText - The original subtitle text
    * @param translatedText - The translated subtitle text
-   * @param triggerAnimation - Whether to trigger the reveal animation (on cue change)
-   * @param cueDuration - Duration of the cue in milliseconds (for animation timing)
+   * @param cueStartTime - Start time of the cue in video (ms)
+   * @param cueEndTime - End time of the cue in video (ms)
    */
   private updateOverlaySimple(
     originalText: string,
     translatedText: string,
-    triggerAnimation: boolean,
-    cueDuration: number = 3000
+    cueStartTime: number,
+    cueEndTime: number
   ): void {
     if (!this.overlayElement) {
       this.createOverlay();
@@ -1409,20 +1398,16 @@ export class RealtimeTranslator {
     // Update translated text
     const textToShow = translatedText || originalText;
 
-    if (triggerAnimation && this.progressiveRevealEnabled && textToShow.length > 0) {
-      // Start smooth reveal animation
-      // With shorter cues (max 3s, ~40 chars), use faster reveal
-      // Reveal over 50% of cue duration, capped between 0.4s and 1.5s
-      this.revealDuration = Math.max(400, Math.min(cueDuration * 0.5, 1500));
-      this.revealStartTime = performance.now();
-      this.currentRevealProgress = 0;
+    if (this.progressiveRevealEnabled && textToShow.length > 0) {
+      // Store cue timing for video-time-based animation
+      this.revealCueStartTime = cueStartTime;
+      this.revealCueEndTime = cueEndTime;
 
-      // Store full text and start animation
+      // Store full text for animation
       if (this.translatedSpan) {
         this.translatedSpan.dataset.fullText = textToShow;
-        // Start with ~20% of text visible to avoid jarring empty-to-text transition
-        const initialChars = Math.max(1, Math.floor(textToShow.length * 0.2));
-        this.translatedSpan.textContent = textToShow.substring(0, initialChars);
+        // Calculate initial reveal based on current video position
+        this.updateRevealedText();
       }
 
       this.startRevealAnimation();
@@ -1437,7 +1422,49 @@ export class RealtimeTranslator {
   }
 
   /**
-   * Start the smooth reveal animation loop
+   * Calculate and update revealed text based on current video time.
+   * This ensures correct sync when seeking or changing playback speed.
+   */
+  private updateRevealedText(): void {
+    if (!this.translatedSpan || !this.translatedSpan.dataset.fullText || !this.videoElement) {
+      return;
+    }
+
+    const fullText = this.translatedSpan.dataset.fullText;
+    const currentVideoTime = this.videoElement.currentTime * 1000; // Convert to ms
+    const cueDuration = this.revealCueEndTime - this.revealCueStartTime;
+
+    // Calculate progress through the cue (0 to 1)
+    const elapsed = currentVideoTime - this.revealCueStartTime;
+    // Reveal text over 70% of cue duration to ensure full text is shown before cue ends
+    const revealDuration = cueDuration * 0.7;
+    const linearProgress = Math.min(1, Math.max(0, elapsed / revealDuration));
+
+    // Ease-out quadratic for smooth deceleration
+    const easedProgress = 1 - Math.pow(1 - linearProgress, 2);
+    this.currentRevealProgress = easedProgress;
+
+    // Calculate characters to show
+    // Bug fix: Always show at least 1 character to avoid flicker on short text
+    const charsToShow = Math.max(1, Math.round(fullText.length * this.currentRevealProgress));
+
+    // Update text content
+    if (charsToShow >= fullText.length) {
+      // Animation complete - show full text
+      this.translatedSpan.textContent = fullText;
+      delete this.translatedSpan.dataset.fullText;
+      this.stopRevealAnimation();
+      return;
+    }
+
+    // Show partial text
+    this.translatedSpan.textContent = fullText.substring(0, charsToShow);
+  }
+
+  /**
+   * Start the smooth reveal animation loop.
+   * Uses requestAnimationFrame for smooth updates, but calculates
+   * progress based on video time for proper sync.
    */
   private startRevealAnimation(): void {
     // Cancel any existing animation
@@ -1445,39 +1472,20 @@ export class RealtimeTranslator {
       cancelAnimationFrame(this.revealAnimationId);
     }
 
-    const animate = (currentTime: number): void => {
+    const animate = (): void => {
       if (!this.translatedSpan || !this.translatedSpan.dataset.fullText) {
-        return;
-      }
-
-      const fullText = this.translatedSpan.dataset.fullText;
-      const elapsed = currentTime - this.revealStartTime;
-
-      // Calculate progress with smooth ease-out curve
-      // Start from 20% (initial text shown) and animate to 100%
-      const linearProgress = Math.min(1, elapsed / this.revealDuration);
-      // Ease-out quadratic for smooth but faster deceleration
-      const easedProgress = 1 - Math.pow(1 - linearProgress, 2);
-      // Map from 0.2 to 1.0
-      this.currentRevealProgress = 0.2 + (easedProgress * 0.8);
-
-      // Calculate characters to show
-      const charsToShow = Math.round(fullText.length * this.currentRevealProgress);
-
-      // Update text content
-      if (charsToShow >= fullText.length) {
-        // Animation complete - show full text
-        this.translatedSpan.textContent = fullText;
-        delete this.translatedSpan.dataset.fullText;
         this.revealAnimationId = null;
         return;
       }
 
-      // Show partial text
-      this.translatedSpan.textContent = fullText.substring(0, charsToShow);
+      this.updateRevealedText();
 
-      // Continue animation
-      this.revealAnimationId = requestAnimationFrame(animate);
+      // Continue animation if text is still being revealed
+      if (this.translatedSpan.dataset.fullText) {
+        this.revealAnimationId = requestAnimationFrame(animate);
+      } else {
+        this.revealAnimationId = null;
+      }
     };
 
     this.revealAnimationId = requestAnimationFrame(animate);
