@@ -8,6 +8,9 @@
 
 import { getAuthConfig, getAuthProvider, type AuthProviderInfo } from '../shared/utils/auth-storage';
 import type { SRTGenerationMode } from '../shared/utils/srt-generator';
+import { createLogger } from '../shared/utils/logger';
+
+const log = createLogger('Popup');
 
 // Subtitle state from content script
 interface SubtitleInfo {
@@ -21,7 +24,7 @@ interface SubtitleInfo {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  console.log('[Popup] Popup loaded');
+  log.debug('Popup loaded');
   
   // Open options page button
   const openOptionsBtn = document.getElementById('open-options');

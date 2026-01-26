@@ -530,9 +530,11 @@ export function logError(error: AppError | Error, level: ErrorLogLevel = 'error'
   // In production, use structured logging
   if (process.env.NODE_ENV === 'production') {
     // Could send to analytics/monitoring service here
+    // eslint-disable-next-line no-console -- Error logging requires dynamic console level
     console[level](`[${info.code}] ${info.message}`);
   } else {
     // In development, log full details
+    // eslint-disable-next-line no-console -- Error logging requires dynamic console level
     console[level]('[Error]', info);
   }
 }

@@ -8,6 +8,9 @@
  */
 
 import type { JobProgress } from '../../shared/types/translation';
+import { createLogger } from '../../shared/utils/logger';
+
+const log = createLogger('ProgressOverlay');
 
 // ============================================================================
 // Types
@@ -264,20 +267,20 @@ export function createProgressOverlay(options: ProgressOverlayOptions = {}): Pro
       
       container.appendChild(overlay);
       visible = true;
-      
-      console.log('[ProgressOverlay] Shown');
+
+      log.debug('Shown');
     },
-    
+
     hide(): void {
       if (!visible) return;
-      
+
       if (overlay) {
         overlay.remove();
         overlay = null;
       }
-      
+
       visible = false;
-      console.log('[ProgressOverlay] Hidden');
+      log.debug('Hidden');
     },
     
     updateProgress(progress: JobProgress): void {

@@ -328,7 +328,7 @@ export class OllamaProvider implements TranslationProvider {
       {
         strategy: this.retryStrategy,
         onRetry: (attempt, error, delay) => {
-          console.debug(`[Ollama] Retry ${attempt}: ${error.message}, waiting ${delay}ms`);
+          console.warn(`[Ollama] Retry ${attempt}: ${error.message}, waiting ${delay}ms`);
         },
       }
     );

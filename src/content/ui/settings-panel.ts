@@ -12,6 +12,9 @@ import type { RenderOptions } from '../adapters/types';
 import type { CachedTranslationInfo } from '../../shared/types/messages';
 import type { Cue, Platform } from '../../shared/types/subtitle';
 import type { SRTGenerationMode } from '../../shared/utils/srt-generator';
+import { createLogger } from '../../shared/utils/logger';
+
+const log = createLogger('SettingsPanel');
 
 // ============================================================================
 // Types
@@ -1010,7 +1013,7 @@ export function createSettingsPanel(options: SettingsPanelOptions): SettingsPane
         }
       });
 
-      console.log('[SettingsPanel] Mounted');
+      log.debug(' Mounted');
     },
 
     unmount(): void {
@@ -1025,7 +1028,7 @@ export function createSettingsPanel(options: SettingsPanelOptions): SettingsPane
         debounceTimer = null;
       }
 
-      console.log('[SettingsPanel] Unmounted');
+      log.debug(' Unmounted');
     },
 
     show(): void {
@@ -1117,7 +1120,7 @@ export function createSettingsPanel(options: SettingsPanelOptions): SettingsPane
     },
 
     updateSubtitleState(state: SubtitleState): void {
-      console.log('[SettingsPanel] updateSubtitleState called:', {
+      log.debug(' updateSubtitleState called:', {
         hasPanel: !!panel,
         availableSubtitles: state.availableSubtitles,
         selectedSubtitleId: state.selectedSubtitleId,
@@ -1127,7 +1130,7 @@ export function createSettingsPanel(options: SettingsPanelOptions): SettingsPane
 
       // Update subtitle selector
       const selectorContainer = panel?.querySelector('#settings-subtitle-selector');
-      console.log('[SettingsPanel] selectorContainer found:', !!selectorContainer);
+      log.debug(`selectorContainer found: ${!!selectorContainer}`);
       if (selectorContainer) {
         updateSubtitleSelector(selectorContainer as HTMLElement);
       }

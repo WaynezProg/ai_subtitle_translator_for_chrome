@@ -10,6 +10,9 @@
 import type { Cue } from '../shared/types/subtitle';
 import type { RenderOptions } from './adapters/types';
 import { DEFAULT_RENDER_OPTIONS } from './adapters/types';
+import { createLogger } from '../shared/utils/logger';
+
+const log = createLogger('SubtitleRenderer');
 
 // ============================================================================
 // Constants
@@ -349,7 +352,7 @@ export function createSubtitleRenderer(): SubtitleRenderer {
       });
       resizeObserver.observe(video);
       
-      console.log('[SubtitleRenderer] Attached to video element');
+      log.debug('Attached to video element');
     },
     
     setSubtitles(newCues: Cue[], newOptions?: Partial<RenderOptions>): void {
@@ -366,7 +369,7 @@ export function createSubtitleRenderer(): SubtitleRenderer {
       // Reset current cue to force re-render
       currentCueIndex = -1;
       
-      console.log(`[SubtitleRenderer] Set ${cues.length} cues`);
+      log.debug(`Set ${cues.length} cues`);
     },
     
     updateOptions(newOptions: Partial<RenderOptions>): void {
@@ -415,7 +418,7 @@ export function createSubtitleRenderer(): SubtitleRenderer {
       cues = [];
       currentCueIndex = -1;
       
-      console.log('[SubtitleRenderer] Detached');
+      log.debug('Detached');
     },
   };
 }

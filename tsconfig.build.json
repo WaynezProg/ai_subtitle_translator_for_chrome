@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    // Disable declaration generation for production builds
+    "declaration": false,
+    "declarationMap": false,
+    // Still emit source maps (handled by webpack)
+    "sourceMap": false
+  }
+}

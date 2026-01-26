@@ -29,9 +29,12 @@ import {
   clearChatGPTTokens,
   launchChatGPTOAuthFlow,
 } from '../shared/providers/chatgpt-oauth';
+import { createLogger } from '../shared/utils/logger';
+
+const log = createLogger('Options');
 
 document.addEventListener('DOMContentLoaded', () => {
-  console.log('[Options] Options page loaded');
+  log.debug('Options page loaded');
   
   // Initialize UI event handlers
   initProviderSelector();
@@ -196,11 +199,11 @@ async function handleOAuthLogin(): Promise<void> {
 
     if (providerType === 'claude-subscription') {
       await launchClaudeOAuthFlow();
-      console.log('[Options] Claude OAuth success, tokens received');
+      log.debug('Claude OAuth success, tokens received');
       showNotification(`${providerName} 登入成功！`);
     } else {
       await launchChatGPTOAuthFlow();
-      console.log('[Options] ChatGPT OAuth success, tokens received');
+      log.debug('ChatGPT OAuth success, tokens received');
       showNotification(`${providerName} 登入成功！`);
     }
 
@@ -728,7 +731,7 @@ async function validateApiKey(): Promise<void> {
     const authProvider = await getAuthProvider(providerType);
     if (authProvider?.apiKey) {
       apiKey = authProvider.apiKey;
-      console.log('[Options] Using stored API key for validation');
+      log.debug('Using stored API key for validation');
     } else {
       showNotification('請輸入 API Key', 'error');
       return;
@@ -950,7 +953,7 @@ async function saveSettings(): Promise<void> {
     
     if (providerRadio) {
       // Provider configuration will be expanded in Phase 5
-      console.log('[Options] Selected provider:', providerRadio.value);
+      log.debug(`Selected provider: ${providerRadio.value}`);
     }
     
     showNotification('設定已儲存');
@@ -963,7 +966,7 @@ async function saveSettings(): Promise<void> {
 async function clearAllCache(): Promise<void> {
   try {
     await cacheManager.clear();
-    console.log('[Options] Cache cleared');
+    log.debug('Cache cleared');
     showNotification('快取已清除');
     
     // Refresh stats
@@ -1067,7 +1070,7 @@ function createCacheEntryItem(entry: TranslationCache): HTMLElement {
 async function deleteCacheEntry(videoId: string): Promise<void> {
   try {
     const deleted = await cacheManager.deleteByVideoId(videoId);
-    console.log(`[Options] Deleted ${deleted} cache entries for video ${videoId}`);
+    log.debug(`Deleted ${deleted} cache entries for video ${videoId}`);
     showNotification('已刪除快取');
     
     // Refresh stats

@@ -1,13 +1,17 @@
 /**
  * Translate Button Component
- * 
+ *
  * Injects a translate button into the video player controls.
  * Supports different platforms with platform-specific styling.
  * Now includes integrated settings panel trigger.
- * 
+ *
  * @see FR-024: Translate Button Requirements
  * @see specs/player-ui - Translate Button Integration
  */
+
+import { createLogger } from '../../shared/utils/logger';
+
+const log = createLogger('TranslateButton');
 
 // ============================================================================
 // Types
@@ -261,20 +265,20 @@ export function createTranslateButton(options: TranslateButtonOptions): Translat
       }
       
       mounted = true;
-      console.log('[TranslateButton] Mounted');
+      log.debug('Mounted');
     },
-    
+
     unmount(): void {
       if (!mounted) return;
-      
+
       if (container) {
         container.remove();
         container = null;
         button = null;
       }
-      
+
       mounted = false;
-      console.log('[TranslateButton] Unmounted');
+      log.debug('Unmounted');
     },
     
     setState(newState: TranslateButtonState): void {

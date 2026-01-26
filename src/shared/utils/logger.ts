@@ -247,8 +247,10 @@ export function createLogger(module: string): Logger {
       if (error) {
         logData.error = serializeData(error) as Record<string, unknown>;
       }
+      // eslint-disable-next-line no-console -- Logger infrastructure requires dynamic console access
       console[consoleMethod](formattedMessage, logData);
     } else {
+      // eslint-disable-next-line no-console -- Logger infrastructure requires dynamic console access
       console[consoleMethod](formattedMessage);
     }
   };

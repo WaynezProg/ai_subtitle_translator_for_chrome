@@ -13,6 +13,9 @@ import {
   buildAuthorizationUrl,
 } from './oauth-pkce';
 import { encrypt, decrypt, isEncryptedData, type EncryptedData } from '../utils/crypto';
+import { createLogger } from '../utils/logger';
+
+const log = createLogger('ClaudeOAuth');
 
 // ============================================================================
 // Constants
@@ -188,8 +191,8 @@ export async function validateClaudeToken(accessToken: string): Promise<boolean>
       }),
     });
     
-    console.log('[ClaudeOAuth] Validation response status:', response.status);
-    
+    log.debug(`Validation response status: ${response.status}`);
+
     // 200 = success, token is valid
     // 400 = bad request but auth succeeded (token valid)
     // 401/403 = unauthorized (token invalid)
@@ -197,16 +200,16 @@ export async function validateClaudeToken(accessToken: string): Promise<boolean>
     if (response.ok || response.status === 400 || response.status === 429) {
       return true;
     }
-    
+
     // Log error details for debugging
     if (!response.ok) {
       const errorText = await response.text();
-      console.warn('[ClaudeOAuth] Validation failed:', response.status, errorText);
+      log.warn(`Validation failed: ${response.status} ${errorText}`);
     }
-    
+
     return false;
   } catch (error) {
-    console.error('[ClaudeOAuth] Token validation error:', error);
+    log.error('Token validation error', { error });
     return false;
   }
 }
@@ -449,34 +452,34 @@ export async function getValidClaudeToken(): Promise<string | null> {
   // If expiration status is unknown (no expiresAt set), return token directly
   // Let the API call determine if it's valid - provider will handle 401/403 retry
   if (expiredStatus === 'unknown') {
-    console.log('[ClaudeOAuth] No expiresAt set, returning token (API call will validate)');
+    log.debug('No expiresAt set, returning token (API call will validate)');
     return tokens.accessToken;
   }
-  
+
   // Token is not expired locally, return it directly
   if (expiredStatus === false) {
     return tokens.accessToken;
   }
-  
+
   // Token is expired, attempt refresh
-  console.log('[ClaudeOAuth] Token expired based on expiresAt, attempting refresh...');
-  
+  log.debug('Token expired based on expiresAt, attempting refresh...');
+
   if (!tokens.refreshToken) {
     // No refresh token, need to re-authenticate
-    console.warn('[ClaudeOAuth] No refresh token available, clearing tokens');
+    log.warn('No refresh token available, clearing tokens');
     await clearClaudeTokens();
     return null;
   }
-  
+
   try {
     // Refresh the token
     const newTokens = await refreshClaudeToken(tokens.refreshToken);
     await storeClaudeTokens(newTokens);
-    console.log('[ClaudeOAuth] Token refreshed successfully');
+    log.debug('Token refreshed successfully');
     return newTokens.accessToken;
   } catch (error) {
     // Refresh failed, clear tokens
-    console.error('[ClaudeOAuth] Token refresh failed:', error);
+    log.error('Token refresh failed', { error });
     await clearClaudeTokens();
     return null;
   }

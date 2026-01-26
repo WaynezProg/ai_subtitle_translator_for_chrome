@@ -30,6 +30,16 @@ import { sendToTab } from './message-handler';
 import { cacheManager, createCacheKey, type CacheResult, type CacheManagerStats } from '../shared/cache';
 import type { TranslationCache } from '../shared/types/translation';
 import { createLogger } from '../shared/utils/logger';
+import {
+  queueFailedTranslation,
+  getTranslationRetryQueue,
+  getTranslationRetryStats,
+  clearTranslationRetryQueue,
+  type TranslationRetryPayload,
+  type RetryQueueStats,
+  type RetryItem,
+} from '../shared/utils/retry-queue';
+import { getRateLimiter } from '../shared/utils/rate-limiter';
 
 const log = createLogger('TranslationService');
 
@@ -134,6 +144,8 @@ export class TranslationService {
   private activeJobs: Map<string, TranslationJobState> = new Map();
   // Track pending requests by video+language key to prevent duplicate requests
   private pendingRequests: Map<string, Promise<string>> = new Map();
+  // Store original request data for retry capability
+  private requestData: Map<string, TranslationJobRequest> = new Map();
   
   /**
    * Check cache for existing translation
@@ -478,14 +490,21 @@ export class TranslationService {
       
     } catch (error) {
       job.status = 'failed';
+      const errorCode = this.mapErrorCode(error);
+      const isRetryable = this.isRetryable(error);
       job.error = {
-        code: this.mapErrorCode(error),
+        code: errorCode,
         message: error instanceof Error ? error.message : 'Unknown error',
-        retryable: this.isRetryable(error),
+        retryable: isRetryable,
       };
       job.updatedAt = new Date().toISOString();
-      
+
       await this.sendTranslationError(job);
+
+      // Queue for retry if the error is retryable
+      if (isRetryable) {
+        await this.queueForRetry(request, errorCode, job.error.message);
+      }
 
       log.error(`Job ${jobId} failed`, normalizeError(error));
     } finally {
@@ -604,6 +623,156 @@ export class TranslationService {
     return false;
   }
   
+  // ============================================================================
+  // Retry Queue Operations
+  // ============================================================================
+
+  /**
+   * Queue a failed translation for later retry
+   */
+  private async queueForRetry(
+    request: TranslationJobRequest,
+    errorCode: ErrorCode,
+    errorMessage: string
+  ): Promise<void> {
+    try {
+      const payload: TranslationRetryPayload = {
+        videoId: request.videoId,
+        platform: request.platform,
+        sourceLanguage: request.sourceLanguage,
+        targetLanguage: request.targetLanguage,
+        provider: request.provider.type,
+        tabId: request.tabId,
+      };
+
+      // Store original request for retry
+      const key = `${request.platform}:${request.videoId}:${request.sourceLanguage}:${request.targetLanguage}`;
+      this.requestData.set(key, request);
+
+      await queueFailedTranslation(payload, {
+        errorCode,
+        errorMessage,
+        priority: this.getRetryPriority(errorCode),
+      });
+
+      log.debug('Queued failed translation for retry', {
+        videoId: request.videoId,
+        errorCode,
+      });
+    } catch (error) {
+      log.error('Failed to queue translation for retry', normalizeError(error));
+    }
+  }
+
+  /**
+   * Get retry priority based on error type
+   */
+  private getRetryPriority(errorCode: ErrorCode): number {
+    // Higher priority for network errors (more likely to succeed on retry)
+    switch (errorCode) {
+      case 'NETWORK_ERROR':
+        return 10;
+      case 'TIMEOUT':
+        return 8;
+      case 'RATE_LIMITED':
+        return 5;
+      case 'API_ERROR':
+        return 3;
+      default:
+        return 1;
+    }
+  }
+
+  /**
+   * Process pending retries
+   */
+  async processRetryQueue(): Promise<{ processed: number; succeeded: number; failed: number }> {
+    const queue = getTranslationRetryQueue();
+    await queue.initialize();
+
+    // Register handler for processing retries
+    queue.registerHandler('translation', async (item: RetryItem<TranslationRetryPayload>) => {
+      const payload = item.payload;
+      const key = `${payload.platform}:${payload.videoId}:${payload.sourceLanguage}:${payload.targetLanguage}`;
+      const originalRequest = this.requestData.get(key);
+
+      if (!originalRequest) {
+        throw new Error('Original request data not found for retry');
+      }
+
+      // Re-attempt the translation
+      await this.startTranslation(originalRequest);
+
+      // Clean up stored request on success
+      this.requestData.delete(key);
+
+      return { success: true };
+    });
+
+    // Use provider rate limiter
+    const rateLimiter = getRateLimiter('default');
+    queue.setRateLimiter(rateLimiter);
+
+    const results = await queue.processReady();
+
+    const succeeded = results.filter((r) => r.success).length;
+    const failed = results.filter((r) => !r.success).length;
+
+    log.debug('Processed retry queue', {
+      total: results.length,
+      succeeded,
+      failed,
+    });
+
+    return {
+      processed: results.length,
+      succeeded,
+      failed,
+    };
+  }
+
+  /**
+   * Get retry queue statistics
+   */
+  async getRetryQueueStats(): Promise<RetryQueueStats> {
+    return getTranslationRetryStats();
+  }
+
+  /**
+   * Clear the retry queue
+   */
+  async clearRetryQueue(): Promise<void> {
+    return clearTranslationRetryQueue();
+  }
+
+  /**
+   * Manually retry a specific failed translation
+   */
+  async retryTranslation(
+    platform: string,
+    videoId: string,
+    sourceLanguage: string,
+    targetLanguage: string
+  ): Promise<string | null> {
+    const key = `${platform}:${videoId}:${sourceLanguage}:${targetLanguage}`;
+    const originalRequest = this.requestData.get(key);
+
+    if (!originalRequest) {
+      log.warn('No stored request found for retry', { key });
+      return null;
+    }
+
+    // Start the translation
+    const jobId = await this.startTranslation(originalRequest);
+
+    // Remove from retry queue if present
+    const queue = getTranslationRetryQueue();
+    await queue.initialize();
+    await queue.remove(key);
+
+    return jobId;
+  }
+
   // ============================================================================
   // Cache Operations
   // ============================================================================

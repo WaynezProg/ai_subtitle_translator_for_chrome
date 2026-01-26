@@ -57,6 +57,21 @@ declare const __PRELOADED_CHATGPT_TOKEN__: {
 
 log.info('AI Subtitle Translator Service Worker initialized');
 
+// Global error handling for service worker
+self.addEventListener('error', (event: ErrorEvent) => {
+  log.error('Uncaught error in service worker', {
+    message: event.message,
+    filename: event.filename,
+    lineno: event.lineno,
+  });
+});
+
+self.addEventListener('unhandledrejection', (event: PromiseRejectionEvent) => {
+  log.error('Unhandled promise rejection in service worker', {
+    reason: event.reason instanceof Error ? event.reason.message : String(event.reason),
+  });
+});
+
 // ============================================================================
 // Helper Functions
 // ============================================================================

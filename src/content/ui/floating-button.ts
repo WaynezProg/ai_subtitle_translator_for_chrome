@@ -5,6 +5,10 @@
  * This provides better discoverability than the control bar button.
  */
 
+import { createLogger } from '../../shared/utils/logger';
+
+const log = createLogger('FloatingButton');
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -318,7 +322,7 @@ export function createFloatingButton(options: FloatingButtonOptions): FloatingBu
       playerContainer.appendChild(container);
 
       mounted = true;
-      console.log('[FloatingButton] Mounted to', platform, 'player');
+      log.debug(`Mounted to ${platform} player`);
     },
 
     unmount(): void {
@@ -331,7 +335,7 @@ export function createFloatingButton(options: FloatingButtonOptions): FloatingBu
       }
 
       mounted = false;
-      console.log('[FloatingButton] Unmounted');
+      log.debug('Unmounted');
     },
 
     setState(newState: FloatingButtonState): void {

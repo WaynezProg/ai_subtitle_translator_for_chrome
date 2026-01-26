@@ -14,6 +14,9 @@ import type { CacheKey, TranslationCache, SerializedCacheKey } from '../types/tr
 import { serializeCacheKey } from '../types/translation';
 import { CACHE_CONFIG } from '../utils/constants';
 import { estimateByteSize } from './cache-utils';
+import { createLogger } from '../utils/logger';
+
+const log = createLogger('L2Cache');
 
 // ============================================================================
 // Types
@@ -108,13 +111,13 @@ export class L2IndexedDBCache {
       const request = indexedDB.open(this.dbName, this.dbVersion);
       
       request.onerror = (): void => {
-        console.error('[L2Cache] Failed to open database:', request.error);
+        log.error('Failed to open database', { error: request.error });
         reject(request.error);
       };
-      
+
       request.onsuccess = (): void => {
         this.db = request.result;
-        console.log('[L2Cache] Database opened successfully');
+        log.debug('Database opened successfully');
         resolve();
       };
       
@@ -138,7 +141,7 @@ export class L2IndexedDBCache {
       store.createIndex('lastAccessedAt', 'lastAccessedAt', { unique: false });
       store.createIndex('createdAt', 'createdAt', { unique: false });
       
-      console.log('[L2Cache] Schema created');
+      log.debug('Schema created');
     }
   }
   
@@ -478,15 +481,15 @@ export class L2IndexedDBCache {
       let evicted = 0;
       
       request.onerror = (): void => {
-        console.error('[L2Cache] LRU eviction failed:', request.error);
+        log.error('LRU eviction failed', { error: request.error });
         reject(request.error);
       };
-      
+
       request.onsuccess = (): void => {
         const cursor = request.result;
         if (cursor && evicted < countToEvict) {
           const entry = cursor.value as StoredCacheEntry;
-          console.log(`[L2Cache] Evicting LRU entry: ${entry.key}`);
+          log.debug(`Evicting LRU entry: ${entry.key}`);
           cursor.delete();
           evicted++;
           cursor.continue();
@@ -515,10 +518,10 @@ export class L2IndexedDBCache {
       let evicted = 0;
       
       request.onerror = (): void => {
-        console.error('[L2Cache] Expired eviction failed:', request.error);
+        log.error('Expired eviction failed', { error: request.error });
         reject(request.error);
       };
-      
+
       request.onsuccess = (): void => {
         const cursor = request.result;
         if (cursor) {
@@ -526,7 +529,7 @@ export class L2IndexedDBCache {
           evicted++;
           cursor.continue();
         } else {
-          console.log(`[L2Cache] Evicted ${evicted} expired entries`);
+          log.debug(`Evicted ${evicted} expired entries`);
           resolve(evicted);
         }
       };
@@ -558,12 +561,12 @@ export class L2IndexedDBCache {
       const request = indexedDB.deleteDatabase(this.dbName);
       
       request.onerror = (): void => {
-        console.error('[L2Cache] Database deletion failed:', request.error);
+        log.error('Database deletion failed', { error: request.error });
         reject(request.error);
       };
-      
+
       request.onsuccess = (): void => {
-        console.log('[L2Cache] Database deleted');
+        log.debug('Database deleted');
         resolve();
       };
     });

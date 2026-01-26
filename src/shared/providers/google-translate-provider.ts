@@ -300,7 +300,7 @@ export class GoogleTranslateProvider implements TranslationProvider {
         {
           strategy: this.retryStrategy,
           onRetry: (attempt, error, delay) => {
-            console.debug(`[GoogleTranslate] Retry ${attempt}: ${error.message}, waiting ${delay}ms`);
+            console.warn(`[GoogleTranslate] Retry ${attempt}: ${error.message}, waiting ${delay}ms`);
           },
         }
       );

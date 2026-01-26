@@ -8,6 +8,9 @@
 import { STORAGE_KEYS, DEFAULT_TARGET_LANGUAGE, UI_CONSTANTS } from './constants';
 import type { ProviderType } from '../types/auth';
 import type { RenderOptions } from '../../content/adapters/types';
+import { createLogger } from './logger';
+
+const log = createLogger('Preferences');
 
 // ============================================================================
 // Types
@@ -197,9 +200,9 @@ export async function acceptSubscriptionDisclaimer(
       [STORAGE_KEYS.TOS_ACCEPTED]: filtered,
     });
     
-    console.log(`[Preferences] Subscription disclaimer accepted for ${providerType}`);
+    log.debug(`Subscription disclaimer accepted for ${providerType}`);
   } catch (error) {
-    console.error('[Preferences] Failed to save disclaimer acceptance:', error);
+    log.error('Failed to save disclaimer acceptance', { error });
     throw error;
   }
 }

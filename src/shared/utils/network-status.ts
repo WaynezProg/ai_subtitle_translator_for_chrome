@@ -7,6 +7,9 @@
  */
 
 import { getAuthConfig, hasValidCredentials } from './auth-storage';
+import { createLogger } from './logger';
+
+const log = createLogger('NetworkStatus');
 
 // ============================================================================
 // Types
@@ -140,12 +143,12 @@ async function notifyListeners(): Promise<void> {
 // Setup event listeners
 if (typeof window !== 'undefined') {
   window.addEventListener('online', () => {
-    console.log('[NetworkStatus] Online');
+    log.debug('Online');
     void notifyListeners();
   });
-  
+
   window.addEventListener('offline', () => {
-    console.log('[NetworkStatus] Offline');
+    log.debug('Offline');
     void notifyListeners();
   });
 }

@@ -12,6 +12,9 @@ import {
   completePKCEFlow,
 } from './oauth-pkce';
 import { encrypt, decrypt, isEncryptedData, type EncryptedData } from '../utils/crypto';
+import { createLogger } from '../utils/logger';
+
+const log = createLogger('ChatGPTOAuth');
 
 // ============================================================================
 // Constants
@@ -119,11 +122,12 @@ export async function completeChatGPTOAuth(
  * Refresh the access token using the refresh token
  */
 export async function refreshChatGPTToken(refreshToken: string): Promise<ChatGPTOAuthTokens> {
-  console.log('[ChatGPTOAuth] Attempting token refresh...');
-  console.log('[ChatGPTOAuth] Token URL:', CHATGPT_OAUTH_CONFIG.tokenUrl);
-  console.log('[ChatGPTOAuth] Client ID:', CHATGPT_OAUTH_CONFIG.clientId);
-  console.log('[ChatGPTOAuth] Refresh token (first 20 chars):', refreshToken.substring(0, 20) + '...');
-  
+  log.debug('Attempting token refresh...', {
+    tokenUrl: CHATGPT_OAUTH_CONFIG.tokenUrl,
+    clientId: CHATGPT_OAUTH_CONFIG.clientId,
+    refreshTokenPrefix: refreshToken.substring(0, 20) + '...',
+  });
+
   const response = await fetch(CHATGPT_OAUTH_CONFIG.tokenUrl, {
     method: 'POST',
     headers: {
@@ -135,8 +139,8 @@ export async function refreshChatGPTToken(refreshToken: string): Promise<ChatGPT
       client_id: CHATGPT_OAUTH_CONFIG.clientId,
     }),
   });
-  
-  console.log('[ChatGPTOAuth] Refresh response status:', response.status);
+
+  log.debug(`Refresh response status: ${response.status}`);
   
   if (!response.ok) {
     const error = await response.text();
@@ -181,12 +185,12 @@ export async function validateChatGPTToken(accessToken: string): Promise<boolean
       },
     });
 
-    console.log('[ChatGPTOAuth] Validation response status:', response.status);
+    log.debug(`Validation response status: ${response.status}`);
 
     // 200 = success, token is valid
     if (response.ok) {
       const data = await response.json() as { id?: string; email?: string };
-      console.log('[ChatGPTOAuth] User validated:', data.email || data.id || 'unknown');
+      log.debug(`User validated: ${data.email || data.id || 'unknown'}`);
       return true;
     }
 
@@ -399,40 +403,40 @@ export async function clearChatGPTTokens(): Promise<void> {
  * - If API call fails with 401/403, the provider will handle refresh and retry
  */
 export async function getValidChatGPTToken(): Promise<string | null> {
-  console.log('[ChatGPTOAuth] getValidChatGPTToken called...');
+  log.debug('getValidChatGPTToken called...');
   const tokens = await getStoredChatGPTTokens();
-  
+
   if (!tokens) {
-    console.warn('[ChatGPTOAuth] No tokens stored in chrome.storage');
+    log.warn('No tokens stored in chrome.storage');
     return null;
   }
-  
-  console.log('[ChatGPTOAuth] Found stored tokens:', {
+
+  log.debug('Found stored tokens', {
     hasAccessToken: !!tokens.accessToken,
     hasRefreshToken: !!tokens.refreshToken,
     expiresAt: tokens.expiresAt,
     accessTokenPrefix: tokens.accessToken?.substring(0, 20) + '...',
   });
-  
+
   // Check if token is expired based on stored expiration time
   const expiredStatus = isChatGPTTokenExpired(tokens.expiresAt);
-  console.log('[ChatGPTOAuth] Token expiration status:', expiredStatus);
-  
+  log.debug(`Token expiration status: ${expiredStatus}`);
+
   // If expiration status is unknown (no expiresAt set), return token directly
   // Let the API call determine if it's valid - provider will handle 401/403 retry
   if (expiredStatus === 'unknown') {
-    console.log('[ChatGPTOAuth] No expiresAt set, returning token (API call will validate)');
+    log.debug('No expiresAt set, returning token (API call will validate)');
     return tokens.accessToken;
   }
-  
+
   // Token is not expired locally, return it directly
   if (expiredStatus === false) {
-    console.log('[ChatGPTOAuth] Token not expired, returning directly');
+    log.debug('Token not expired, returning directly');
     return tokens.accessToken;
   }
-  
+
   // Token is expired, attempt refresh
-  console.log('[ChatGPTOAuth] Token expired based on expiresAt, attempting refresh...');
+  log.debug('Token expired based on expiresAt, attempting refresh...');
   return await tryRefreshToken(tokens);
 }
 
@@ -442,20 +446,20 @@ export async function getValidChatGPTToken(): Promise<string | null> {
 async function tryRefreshToken(tokens: ChatGPTOAuthTokens): Promise<string | null> {
   if (!tokens.refreshToken) {
     // No refresh token, need to re-authenticate
-    console.warn('[ChatGPTOAuth] No refresh token available, clearing tokens');
+    log.warn('No refresh token available, clearing tokens');
     await clearChatGPTTokens();
     return null;
   }
-  
+
   try {
     // Refresh the token
     const newTokens = await refreshChatGPTToken(tokens.refreshToken);
     await storeChatGPTTokens(newTokens);
-    console.log('[ChatGPTOAuth] Token refreshed successfully');
+    log.debug('Token refreshed successfully');
     return newTokens.accessToken;
   } catch (error) {
     // Refresh failed, clear tokens
-    console.error('[ChatGPTOAuth] Token refresh failed:', error);
+    log.error('Token refresh failed', { error });
     await clearChatGPTTokens();
     return null;
   }

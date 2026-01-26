@@ -2,6 +2,7 @@ const path = require('path');
 const fs = require('fs');
 const CopyPlugin = require('copy-webpack-plugin');
 const webpack = require('webpack');
+const TerserPlugin = require('terser-webpack-plugin');
 
 // ============================================================================
 // Load pre-generated session tokens (from session-helper tool)
@@ -53,7 +54,10 @@ function loadSessionTokens() {
 
 const preloadedTokens = loadSessionTokens();
 
-module.exports = {
+module.exports = (env, argv) => {
+  const isProduction = argv.mode === 'production';
+
+  return {
   entry: {
     background: './src/background/index.ts',
     content: './src/content/index.ts',
@@ -70,7 +74,13 @@ module.exports = {
     rules: [
       {
         test: /\.ts$/,
-        use: 'ts-loader',
+        use: {
+          loader: 'ts-loader',
+          options: {
+            // Use production tsconfig for prod builds (no declarations)
+            configFile: isProduction ? 'tsconfig.build.json' : 'tsconfig.json',
+          },
+        },
         exclude: /node_modules/
       },
       {
@@ -90,10 +100,12 @@ module.exports = {
     }
   },
   plugins: [
-    // Inject preloaded session tokens at build time
+    // Inject preloaded session tokens and environment at build time
     new webpack.DefinePlugin({
       '__PRELOADED_CLAUDE_TOKEN__': JSON.stringify(preloadedTokens.claude),
       '__PRELOADED_CHATGPT_TOKEN__': JSON.stringify(preloadedTokens.chatgpt),
+      // Enable dead code elimination for production
+      'process.env.NODE_ENV': JSON.stringify(isProduction ? 'production' : 'development'),
     }),
     new CopyPlugin({
       patterns: [
@@ -109,7 +121,35 @@ module.exports = {
     })
   ],
   optimization: {
-    splitChunks: false
+    splitChunks: false,
+    // Minimize in production
+    minimize: isProduction,
+    minimizer: isProduction ? [
+      new TerserPlugin({
+        terserOptions: {
+          compress: {
+            // Remove console.debug statements in production
+            pure_funcs: ['console.debug'],
+            // Drop debugger statements
+            drop_debugger: true,
+            // Remove unused code more aggressively
+            passes: 2,
+          },
+          mangle: {
+            // Mangle property names for smaller bundles (safe for this project)
+            properties: false,
+          },
+          format: {
+            // Remove comments
+            comments: false,
+          },
+        },
+        extractComments: false,
+      }),
+    ] : [],
   },
-  devtool: 'source-map'
+  // Use lighter source maps in production (hidden-source-map generates maps but doesn't reference them)
+  // In development, use inline-source-map for better debugging
+  devtool: isProduction ? 'hidden-source-map' : 'inline-source-map',
+  };
 };

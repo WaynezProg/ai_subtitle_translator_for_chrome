@@ -59,6 +59,7 @@ import { detectSubtitleFormat, parseSubtitle as parseSubtitleByFormat } from '..
 import type { SRTGenerationMode } from '../shared/utils/srt-generator';
 import type { SubtitleState, SubtitleOption } from './ui/settings-panel';
 import { smartConsolidateASRCues } from '../shared/utils/asr-consolidator';
+import { initGlobalErrorHandler } from '../shared/utils/global-error-handler';
 
 // ============================================================================
 // State
@@ -92,7 +93,24 @@ log.debug('[Content] AI Subtitle Translator Content Script loaded');
  */
 async function initialize(): Promise<void> {
   if (initialized) return;
-  
+
+  // Initialize global error handler to catch uncaught exceptions
+  initGlobalErrorHandler({
+    showNotifications: true,
+    notify: (message, type) => {
+      if (type === 'error') {
+        showErrorToast('API_ERROR', message);
+      }
+    },
+    onError: (error, source) => {
+      log.error(`Global ${source}`, {
+        code: error.code,
+        message: error.message,
+        category: error.category,
+      });
+    },
+  });
+
   // Check if supported platform
   if (!isSupportedPlatform()) {
     log.debug('[Content] Not a supported platform');
