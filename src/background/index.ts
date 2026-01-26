@@ -585,11 +585,14 @@ messageHandler.on('TRANSLATE_TEXT', async (message: TranslateTextMessage, _sende
       : undefined;
 
     // Translate with context for better consistency
+    // Use the model from credentials if available, otherwise let the provider use its default
+    const modelToUse = credentials.type === 'api-key' ? credentials.model :
+                       credentials.type === 'ollama' ? credentials.model : undefined;
     const result = await translationProvider.translate({
       cues: [{ index: 0, text }],
       sourceLanguage,
       targetLanguage,
-      model: providerType === 'google-translate' ? '' : 'default',
+      model: modelToUse,
       previousContext,
     });
 

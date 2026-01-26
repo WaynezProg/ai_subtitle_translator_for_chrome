@@ -105,6 +105,14 @@ function handleRejection(event: PromiseRejectionEvent): void {
     ErrorCodes.UNKNOWN_ERROR
   );
 
+  // Skip extension context invalidated errors - these are expected after extension updates
+  // and the user just needs to refresh the page
+  if (isExtensionContextError(appError.message)) {
+    log.debug('Extension context invalidated - page refresh required');
+    event.preventDefault();
+    return;
+  }
+
   log.error('Unhandled promise rejection', {
     message: appError.message,
     code: appError.code,
@@ -114,6 +122,21 @@ function handleRejection(event: PromiseRejectionEvent): void {
 
   // Prevent default browser handling
   event.preventDefault();
+}
+
+/**
+ * Check if the error is related to extension context being invalidated
+ * This happens after extension updates when the old content script tries to communicate
+ */
+function isExtensionContextError(message: string): boolean {
+  const contextErrorPatterns = [
+    'Extension context invalidated',
+    '擴充功能已更新',
+    'Receiving end does not exist',
+    'Could not establish connection',
+    'The message port closed',
+  ];
+  return contextErrorPatterns.some(pattern => message.includes(pattern));
 }
 
 /**
