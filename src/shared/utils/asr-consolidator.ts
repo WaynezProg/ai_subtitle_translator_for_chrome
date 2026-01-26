@@ -97,9 +97,9 @@ export interface ASRConsolidationOptions {
  * - These values balance between too-fragmented (hard to read) and too-long (timing mismatch)
  */
 const DEFAULT_OPTIONS: Required<ASRConsolidationOptions> = {
-  maxGapMs: 1200,           // Creates more natural sentence breaks
-  maxDurationMs: 5000,      // 5 seconds max to prevent desync with audio
-  maxCharsPerCue: 80,       // ~2 lines of subtitle text for readability
+  maxGapMs: 800,            // Shorter gap threshold for more frequent breaks
+  maxDurationMs: 3000,      // 3 seconds max - shorter cues feel more natural
+  maxCharsPerCue: 40,       // ~1 line of subtitle text - less text per cue
   minCharsForSentence: 5,
   sentenceEndChars: ['.', '!', '?', '。', '！', '？', '…', '；', ';', ',', '，'],  // Punctuation breaks
   timingStrategy: 'first',  // Shows translation when speech begins (recommended for ASR)

@@ -86,6 +86,8 @@ const SUBTITLE_STYLES = `
     color: #fff;
     font-size: 28px;
     text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.9);
+    /* Smooth opacity transition for appearing/disappearing */
+    transition: opacity 0.15s ease-out;
   }
 
   .ai-subtitle-original {
@@ -98,6 +100,16 @@ const SUBTITLE_STYLES = `
   .ai-subtitle-translated {
     display: block;
     font-weight: 600;
+  }
+
+  /* Smooth text reveal using clip-path animation */
+  .ai-subtitle-translated {
+    display: inline;
+  }
+
+  .ai-subtitle-reveal-mask {
+    display: inline;
+    /* clip-path will be animated via JavaScript for smooth reveal */
   }
 
   /* Hide YouTube native subtitles when our translator is active */
@@ -147,6 +159,7 @@ export class RealtimeTranslator {
   private progressiveRevealEnabled: boolean = false;
   private lastProgressiveText: string = '';
   private lastProgressiveLength: number = 0;
+  private lastRevealRatio: number = 0;
 
   // Throttle interval for timeupdate (ms)
   // For ASR subtitles: use faster updates (100ms) for better sync with short segments
@@ -386,7 +399,11 @@ export class RealtimeTranslator {
     this.lastDisplayedText = '';
     this.lastDisplayedCueStart = -1;
     this.lastProgressiveLength = 0;
+    this.lastRevealRatio = 0;
     this.cache = {};
+
+    // Reset cached DOM elements
+    this.resetCachedElements();
 
     // Clear translated cues reference to allow garbage collection
     this.options.translatedCues = undefined;
@@ -494,35 +511,20 @@ export class RealtimeTranslator {
         this.translateCurrentCueOnDemand(activeCue);
       }
 
-      // For subtitles with progressive reveal enabled, calculate how much text to show
-      // based on the current position within the cue's time range
-      let displayTranslation = activeCue.translatedText;
-      let displayOriginal = activeCue.originalText;
-
-      if (this.progressiveRevealEnabled) {
-        const { revealedTranslation, revealedOriginal } = this.calculateProgressiveReveal(
-          activeCue,
-          currentTime
-        );
-        displayTranslation = revealedTranslation;
-        displayOriginal = revealedOriginal;
-      }
-
-      // Update display if:
-      // 1. The text has changed, OR
-      // 2. We're on a different cue (different start time) even if text is the same
-      // 3. Progressive reveal text length changed
-      // This ensures consecutive cues with identical text still trigger updates
+      // Use CSS typewriter animation for gradual text reveal
       const cueChanged = activeCue.startTime !== this.lastDisplayedCueStart;
-      const textChanged = displayTranslation !== this.lastDisplayedText;
-      const progressiveChanged = this.progressiveRevealEnabled &&
-        displayTranslation.length !== this.lastProgressiveLength;
+      const textChanged = activeCue.translatedText !== this.lastDisplayedText;
 
-      if (textChanged || cueChanged || progressiveChanged) {
-        this.lastDisplayedText = displayTranslation;
+      if (cueChanged || textChanged) {
+        this.lastDisplayedText = activeCue.translatedText;
         this.lastDisplayedCueStart = activeCue.startTime;
-        this.lastProgressiveLength = displayTranslation.length;
-        this.updateOverlay(displayOriginal, displayTranslation);
+        const cueDuration = activeCue.endTime - activeCue.startTime;
+        this.updateOverlaySimple(
+          activeCue.originalText,
+          activeCue.translatedText,
+          cueChanged,  // trigger typewriter animation on cue change
+          cueDuration
+        );
       }
     } else {
       // No active cue, clear display
@@ -581,13 +583,13 @@ export class RealtimeTranslator {
    * This reveals the translation character by character based on progress through the cue,
    * reducing the perception of "time shift" compared to YouTube's progressive ASR display.
    *
-   * The reveal strategy (optimized for YouTube ASR):
-   * - 0-5% of cue duration: Show first 40% of text (fast start to reduce delay perception)
-   * - 5-80% of cue duration: Linearly reveal to 95% of text (steady progress)
-   * - 80-100% of cue duration: Show full text (ensure complete text shown before end)
+   * The reveal strategy uses a smooth ease-in-out curve to avoid abrupt jumps:
+   * - Start: Small initial reveal (15%) to give context without jarring appearance
+   * - Middle: Smooth ease-in-out curve that accelerates then decelerates
+   * - End: Full text shown by 85% of duration for comfortable reading
    *
-   * This creates a reading experience that feels synchronized with YouTube's
-   * word-by-word ASR display while showing translations progressively.
+   * This creates a natural, smooth reveal that matches the cadence of speech
+   * without sudden "jumps" of text appearing.
    */
   private calculateProgressiveReveal(
     cue: TranslatedCue,
@@ -602,9 +604,15 @@ export class RealtimeTranslator {
       return { revealedTranslation: fullTranslation, revealedOriginal: fullOriginal };
     }
 
-    // For very short cues (< 1 second), show full text immediately
+    // For very short cues (< 800ms), show full text immediately
     // These are typically single words or brief phrases
-    if (duration < 1000) {
+    if (duration < 800) {
+      return { revealedTranslation: fullTranslation, revealedOriginal: fullOriginal };
+    }
+
+    // For short cues (800ms - 2s), show full text immediately
+    // No progressive reveal - CSS handles smooth appearance
+    if (duration < 2000) {
       return { revealedTranslation: fullTranslation, revealedOriginal: fullOriginal };
     }
 
@@ -612,30 +620,16 @@ export class RealtimeTranslator {
     const elapsed = currentTime - cue.startTime;
     const progress = Math.max(0, Math.min(1, elapsed / duration));
 
-    // Optimized reveal strategy for YouTube ASR subtitles:
-    // The key insight is that YouTube ASR shows words progressively as they're spoken,
-    // so our translation should appear to "keep up" with the original.
-    //
-    // Fast start (40% text at 5% time): Gives viewer context immediately
-    // Steady middle (40% → 95% text during 5% → 80% time): Matches speech pace
-    // Quick finish (full text at 80% time): Ensures complete reading before next cue
-    let revealRatio: number;
-    if (progress <= 0.05) {
-      // Fast start: show 40% of text within first 5% of time
-      // This reduces the initial "lag" perception
-      revealRatio = 0.4 * (progress / 0.05);
-    } else if (progress >= 0.8) {
-      // End: show all text to ensure complete reading
-      revealRatio = 1;
-    } else {
-      // Middle: linear reveal from 40% to 95%
-      const middleProgress = (progress - 0.05) / 0.75; // Normalize 0.05-0.8 to 0-1
-      revealRatio = 0.4 + (0.55 * middleProgress);
-    }
+    // Linear reveal strategy for consistent character-by-character appearance
+    // Using linear ensures the same number of characters per time unit,
+    // preventing "chunky" reveals that happen with easing curves
+    const revealRatio = this.calculateSmoothRevealRatio(progress);
 
-    // Calculate characters to show (use character-based for CJK text)
-    const translationLength = Math.ceil(fullTranslation.length * revealRatio);
-    const originalLength = Math.ceil(fullOriginal.length * revealRatio);
+    // Calculate characters to show
+    // Use Math.round for smoother single-character progression
+    // (Math.ceil caused multiple characters to appear at once)
+    const translationLength = Math.max(1, Math.round(fullTranslation.length * revealRatio));
+    const originalLength = Math.max(1, Math.round(fullOriginal.length * revealRatio));
 
     // Reveal text, preferring word boundaries when possible for non-CJK text
     const revealedTranslation = this.revealTextProgressively(fullTranslation, translationLength);
@@ -645,42 +639,111 @@ export class RealtimeTranslator {
   }
 
   /**
-   * Reveal text progressively up to the target length.
-   * For CJK text, reveals character by character.
-   * For Latin text, tries to reveal at word boundaries.
+   * Calculate reveal ratio for word-by-word reveal.
+   *
+   * The key insight: we want a very small initial reveal (just enough
+   * to show something), then smooth linear progression.
+   *
+   * @param progress - Progress through the cue (0.0 to 1.0)
+   * @returns Reveal ratio (0.05 to 1.0) for word count calculation
    */
-  private revealTextProgressively(text: string, targetLength: number): string {
-    if (targetLength >= text.length) {
-      return text;
+  private calculateSmoothRevealRatio(progress: number): number {
+    // Very small minimum - just 5% to show 1-4 characters initially
+    // This avoids both "empty" state AND "too much at once"
+    const MIN_REVEAL = 0.05;
+    // Complete reveal by 80% of duration for comfortable reading
+    const FULL_REVEAL_PROGRESS = 0.80;
+
+    if (progress >= FULL_REVEAL_PROGRESS) {
+      return 1.0;
     }
 
-    // Check if text contains CJK characters (Chinese, Japanese, Korean)
+    // Linear progression from MIN_REVEAL to 1.0
+    const progressRatio = progress / FULL_REVEAL_PROGRESS;
+    return MIN_REVEAL + ((1.0 - MIN_REVEAL) * progressRatio);
+  }
+
+  /**
+   * Split text into segments for word-by-word reveal.
+   * For CJK: splits into 2-character pairs for smoother visual flow
+   * For Latin: splits by words
+   *
+   * Using 2-char segments balances smoothness vs too many updates
+   */
+  private splitTextIntoSegments(text: string): string[] {
+    if (!text) return [];
+
+    // Check if text contains CJK characters
     const hasCJK = /[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]/.test(text);
 
     if (hasCJK) {
-      // For CJK text, reveal character by character
-      return text.substring(0, targetLength);
-    }
+      // For CJK text, split into pairs of characters
+      // This creates smoother visual flow than single chars
+      const segments: string[] = [];
+      const punctuation = /[，。！？、；：「」『』【】（）《》…—～·\s]/;
+      let current = '';
 
-    // For Latin text, try to reveal at word boundaries
-    const words = text.split(/(\s+)/); // Split keeping whitespace
-    let revealed = '';
-    let currentLength = 0;
+      for (let i = 0; i < text.length; i++) {
+        const char = text[i];
+        current += char;
 
-    for (const word of words) {
-      if (currentLength + word.length <= targetLength) {
-        revealed += word;
-        currentLength += word.length;
-      } else if (currentLength === 0) {
-        // At least show partial first word
-        revealed = word.substring(0, targetLength);
-        break;
-      } else {
-        break;
+        // Split at punctuation OR every 2 characters
+        const isPunctuation = punctuation.test(char);
+        const isAtPairBoundary = current.length >= 2;
+
+        if (isPunctuation || isAtPairBoundary) {
+          // Include any following punctuation
+          while (i + 1 < text.length && punctuation.test(text[i + 1])) {
+            i++;
+            current += text[i];
+          }
+
+          if (current.trim()) {
+            segments.push(current);
+          }
+          current = '';
+        }
       }
+
+      // Don't forget remaining text
+      if (current.trim()) {
+        segments.push(current);
+      }
+
+      return segments;
     }
 
-    return revealed;
+    // For Latin text, split by whitespace but keep words together
+    return text.split(/(\s+)/).filter(s => s.length > 0);
+  }
+
+  /**
+   * Calculate how many segments to reveal based on progress.
+   * Always shows at least 1 segment to avoid empty display.
+   */
+  private getVisibleSegmentCount(segments: string[], revealRatio: number): number {
+    if (segments.length === 0) return 0;
+    if (revealRatio >= 1) return segments.length;
+
+    // Always show at least 1 segment to avoid "empty" state
+    // This prevents the jarring "nothing to something" transition
+    const count = Math.round(segments.length * revealRatio);
+    return Math.max(1, count);
+  }
+
+  /**
+   * Reveal text progressively - now returns segment info for word-by-word rendering.
+   * This is kept for backward compatibility but the actual rendering uses segments.
+   */
+  private revealTextProgressively(text: string, targetLength: number): string {
+    // For backward compatibility, just return the text up to target length
+    if (targetLength >= text.length) {
+      return text;
+    }
+    if (targetLength <= 0) {
+      return '';
+    }
+    return text.substring(0, targetLength);
   }
 
   /**
@@ -1038,45 +1101,180 @@ export class RealtimeTranslator {
     document.body.classList.remove('ai-subtitle-hide-netflix');
   }
   
+  // Cached DOM elements for smooth updates (avoid recreating elements)
+  private subtitleContainer: HTMLDivElement | null = null;
+  private originalSpan: HTMLSpanElement | null = null;
+  private translatedSpan: HTMLSpanElement | null = null;
+
   private updateOverlay(originalText: string, translatedText: string, isLoading: boolean = false): void {
     if (!this.overlayElement) {
       console.warn('[RealtimeTranslator] updateOverlay called but overlay not created');
-      // Try to create it now
       this.createOverlay();
       if (!this.overlayElement) {
         console.error('[RealtimeTranslator] Failed to create overlay');
         return;
       }
     }
-    
-    // Clear
-    while (this.overlayElement.firstChild) {
-      this.overlayElement.removeChild(this.overlayElement.firstChild);
+
+    // If no text, hide but don't destroy elements (for smooth transitions)
+    if (!translatedText && !originalText) {
+      if (this.subtitleContainer) {
+        this.subtitleContainer.style.opacity = '0';
+      }
+      return;
     }
-    
-    if (!translatedText && !originalText) return;
-    
-    const container = document.createElement('div');
-    container.className = 'ai-subtitle-text';
-    
-    // Apply render options to container
-    this.applyStylesToElement(container);
-    
-    if (this.options.showOriginal && originalText) {
-      const originalSpan = document.createElement('span');
-      originalSpan.className = 'ai-subtitle-original';
-      originalSpan.textContent = originalText;
-      container.appendChild(originalSpan);
+
+    // Create or reuse container - avoid DOM thrashing
+    if (!this.subtitleContainer || !this.overlayElement.contains(this.subtitleContainer)) {
+      // Clear any old content
+      while (this.overlayElement.firstChild) {
+        this.overlayElement.removeChild(this.overlayElement.firstChild);
+      }
+
+      this.subtitleContainer = document.createElement('div');
+      this.subtitleContainer.className = 'ai-subtitle-text';
+      this.applyStylesToElement(this.subtitleContainer);
+
+      // Create original text span (may be hidden based on settings)
+      this.originalSpan = document.createElement('span');
+      this.originalSpan.className = 'ai-subtitle-original';
+      this.subtitleContainer.appendChild(this.originalSpan);
+
+      // Create translated text span
+      this.translatedSpan = document.createElement('span');
+      this.translatedSpan.className = 'ai-subtitle-translated';
+      this.subtitleContainer.appendChild(this.translatedSpan);
+
+      this.overlayElement.appendChild(this.subtitleContainer);
     }
-    
-    const translatedSpan = document.createElement('span');
-    translatedSpan.className = 'ai-subtitle-translated';
-    translatedSpan.textContent = isLoading ? '翻譯中...' : (translatedText || originalText);
-    container.appendChild(translatedSpan);
-    
-    this.overlayElement.appendChild(container);
+
+    // Ensure container is visible
+    this.subtitleContainer.style.opacity = '1';
+
+    // Update original text span
+    if (this.originalSpan) {
+      if (this.options.showOriginal && originalText) {
+        this.originalSpan.textContent = originalText;
+        this.originalSpan.style.display = 'block';
+      } else {
+        this.originalSpan.style.display = 'none';
+      }
+    }
+
+    // Update translated text span - just update textContent, no DOM recreation
+    if (this.translatedSpan) {
+      this.translatedSpan.textContent = isLoading ? '翻譯中...' : (translatedText || originalText);
+    }
   }
-  
+
+  // Cache for current segments to avoid recreating DOM
+  private currentSegments: string[] = [];
+  private segmentSpans: HTMLSpanElement[] = [];
+
+  /**
+   * Update overlay with word-by-word segment reveal.
+   * Each segment fades in smoothly using CSS transitions.
+   * Key optimization: reuse existing spans, only update visibility.
+   */
+  private updateOverlayWithSegments(
+    originalText: string,
+    translatedText: string,
+    revealRatio: number
+  ): void {
+    if (!this.overlayElement) {
+      this.createOverlay();
+      if (!this.overlayElement) return;
+    }
+
+    if (!translatedText && !originalText) {
+      if (this.subtitleContainer) {
+        this.subtitleContainer.style.opacity = '0';
+      }
+      return;
+    }
+
+    // Create or reuse container
+    if (!this.subtitleContainer || !this.overlayElement.contains(this.subtitleContainer)) {
+      while (this.overlayElement.firstChild) {
+        this.overlayElement.removeChild(this.overlayElement.firstChild);
+      }
+
+      this.subtitleContainer = document.createElement('div');
+      this.subtitleContainer.className = 'ai-subtitle-text';
+      this.applyStylesToElement(this.subtitleContainer);
+
+      this.originalSpan = document.createElement('span');
+      this.originalSpan.className = 'ai-subtitle-original';
+      this.subtitleContainer.appendChild(this.originalSpan);
+
+      this.translatedSpan = document.createElement('span');
+      this.translatedSpan.className = 'ai-subtitle-translated';
+      this.subtitleContainer.appendChild(this.translatedSpan);
+
+      this.overlayElement.appendChild(this.subtitleContainer);
+    }
+
+    this.subtitleContainer.style.opacity = '1';
+
+    // Update original text (show fully, no progressive reveal)
+    if (this.originalSpan) {
+      if (this.options.showOriginal && originalText) {
+        this.originalSpan.textContent = originalText;
+        this.originalSpan.style.display = 'block';
+      } else {
+        this.originalSpan.style.display = 'none';
+      }
+    }
+
+    // Update translated text with word-by-word reveal
+    if (this.translatedSpan) {
+      const segments = this.splitTextIntoSegments(translatedText);
+      const visibleCount = this.getVisibleSegmentCount(segments, revealRatio);
+
+      // Check if segments changed (new cue) - need to rebuild spans
+      const segmentsChanged = segments.length !== this.currentSegments.length ||
+        segments.some((s, i) => s !== this.currentSegments[i]);
+
+      if (segmentsChanged) {
+        // New text - rebuild all spans
+        this.currentSegments = segments;
+        this.segmentSpans = [];
+
+        // Clear existing content
+        while (this.translatedSpan.firstChild) {
+          this.translatedSpan.removeChild(this.translatedSpan.firstChild);
+        }
+
+        // Create spans for each segment
+        // Initially visible segments start with opacity:1 (no transition delay)
+        // Hidden segments start with opacity:0 and will transition when revealed
+        segments.forEach((segment, index) => {
+          const span = document.createElement('span');
+          span.className = 'ai-subtitle-word';
+          span.textContent = segment;
+
+          // Make initially visible segments visible immediately (no flash)
+          if (index < visibleCount) {
+            span.classList.add('ai-subtitle-word-visible');
+          }
+
+          this.segmentSpans.push(span);
+          this.translatedSpan!.appendChild(span);
+        });
+      } else {
+        // Same text - just update visibility of existing spans
+        this.segmentSpans.forEach((span, index) => {
+          if (index < visibleCount) {
+            if (!span.classList.contains('ai-subtitle-word-visible')) {
+              span.classList.add('ai-subtitle-word-visible');
+            }
+          }
+          // Note: we don't remove visibility - once shown, stays shown
+        });
+      }
+    }
+  }
+
   /**
    * Apply current render options to a subtitle element
    */
@@ -1120,11 +1318,180 @@ export class RealtimeTranslator {
   }
   
   private clearOverlay(): void {
-    if (this.overlayElement) {
+    // Just hide the container instead of destroying DOM elements
+    // This allows for smoother transitions when text reappears
+    if (this.subtitleContainer) {
+      this.subtitleContainer.style.opacity = '0';
+    }
+  }
+
+  /**
+   * Reset cached DOM elements (called during cleanup)
+   */
+  private resetCachedElements(): void {
+    this.subtitleContainer = null;
+    this.originalSpan = null;
+    this.translatedSpan = null;
+    this.currentSegments = [];
+    this.segmentSpans = [];
+    this.stopRevealAnimation();
+  }
+
+  // Animation state for smooth reveal
+  private revealAnimationId: number | null = null;
+  private revealStartTime: number = 0;
+  private revealDuration: number = 0;
+  private currentRevealProgress: number = 1; // 0 to 1
+
+  /**
+   * Simple overlay update with smooth progressive reveal.
+   * Uses requestAnimationFrame for buttery-smooth character reveal.
+   *
+   * @param originalText - The original subtitle text
+   * @param translatedText - The translated subtitle text
+   * @param triggerAnimation - Whether to trigger the reveal animation (on cue change)
+   * @param cueDuration - Duration of the cue in milliseconds (for animation timing)
+   */
+  private updateOverlaySimple(
+    originalText: string,
+    translatedText: string,
+    triggerAnimation: boolean,
+    cueDuration: number = 3000
+  ): void {
+    if (!this.overlayElement) {
+      this.createOverlay();
+      if (!this.overlayElement) return;
+    }
+
+    // If no text, hide container and stop animation
+    if (!translatedText && !originalText) {
+      if (this.subtitleContainer) {
+        this.subtitleContainer.style.opacity = '0';
+      }
+      this.stopRevealAnimation();
+      return;
+    }
+
+    // Create or reuse container
+    if (!this.subtitleContainer || !this.overlayElement.contains(this.subtitleContainer)) {
       while (this.overlayElement.firstChild) {
         this.overlayElement.removeChild(this.overlayElement.firstChild);
       }
+
+      this.subtitleContainer = document.createElement('div');
+      this.subtitleContainer.className = 'ai-subtitle-text';
+      this.applyStylesToElement(this.subtitleContainer);
+
+      this.originalSpan = document.createElement('span');
+      this.originalSpan.className = 'ai-subtitle-original';
+      this.subtitleContainer.appendChild(this.originalSpan);
+
+      this.translatedSpan = document.createElement('span');
+      this.translatedSpan.className = 'ai-subtitle-translated';
+      this.subtitleContainer.appendChild(this.translatedSpan);
+
+      this.overlayElement.appendChild(this.subtitleContainer);
     }
+
+    // Ensure container is visible
+    this.subtitleContainer.style.opacity = '1';
+
+    // Update original text
+    if (this.originalSpan) {
+      if (this.options.showOriginal && originalText) {
+        this.originalSpan.textContent = originalText;
+        this.originalSpan.style.display = 'block';
+      } else {
+        this.originalSpan.style.display = 'none';
+      }
+    }
+
+    // Update translated text
+    const textToShow = translatedText || originalText;
+
+    if (triggerAnimation && this.progressiveRevealEnabled && textToShow.length > 0) {
+      // Start smooth reveal animation
+      // With shorter cues (max 3s, ~40 chars), use faster reveal
+      // Reveal over 50% of cue duration, capped between 0.4s and 1.5s
+      this.revealDuration = Math.max(400, Math.min(cueDuration * 0.5, 1500));
+      this.revealStartTime = performance.now();
+      this.currentRevealProgress = 0;
+
+      // Store full text and start animation
+      if (this.translatedSpan) {
+        this.translatedSpan.dataset.fullText = textToShow;
+        // Start with ~20% of text visible to avoid jarring empty-to-text transition
+        const initialChars = Math.max(1, Math.floor(textToShow.length * 0.2));
+        this.translatedSpan.textContent = textToShow.substring(0, initialChars);
+      }
+
+      this.startRevealAnimation();
+    } else {
+      // No animation - show full text immediately
+      this.stopRevealAnimation();
+      if (this.translatedSpan) {
+        this.translatedSpan.textContent = textToShow;
+        delete this.translatedSpan.dataset.fullText;
+      }
+    }
+  }
+
+  /**
+   * Start the smooth reveal animation loop
+   */
+  private startRevealAnimation(): void {
+    // Cancel any existing animation
+    if (this.revealAnimationId !== null) {
+      cancelAnimationFrame(this.revealAnimationId);
+    }
+
+    const animate = (currentTime: number): void => {
+      if (!this.translatedSpan || !this.translatedSpan.dataset.fullText) {
+        return;
+      }
+
+      const fullText = this.translatedSpan.dataset.fullText;
+      const elapsed = currentTime - this.revealStartTime;
+
+      // Calculate progress with smooth ease-out curve
+      // Start from 20% (initial text shown) and animate to 100%
+      const linearProgress = Math.min(1, elapsed / this.revealDuration);
+      // Ease-out quadratic for smooth but faster deceleration
+      const easedProgress = 1 - Math.pow(1 - linearProgress, 2);
+      // Map from 0.2 to 1.0
+      this.currentRevealProgress = 0.2 + (easedProgress * 0.8);
+
+      // Calculate characters to show
+      const charsToShow = Math.round(fullText.length * this.currentRevealProgress);
+
+      // Update text content
+      if (charsToShow >= fullText.length) {
+        // Animation complete - show full text
+        this.translatedSpan.textContent = fullText;
+        delete this.translatedSpan.dataset.fullText;
+        this.revealAnimationId = null;
+        return;
+      }
+
+      // Show partial text
+      this.translatedSpan.textContent = fullText.substring(0, charsToShow);
+
+      // Continue animation
+      this.revealAnimationId = requestAnimationFrame(animate);
+    };
+
+    this.revealAnimationId = requestAnimationFrame(animate);
+  }
+
+  /**
+   * Stop the reveal animation
+   */
+  private stopRevealAnimation(): void {
+    if (this.revealAnimationId !== null) {
+      cancelAnimationFrame(this.revealAnimationId);
+      this.revealAnimationId = null;
+    }
+    this.currentRevealProgress = 1;
   }
 }
 

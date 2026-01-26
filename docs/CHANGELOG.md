@@ -179,6 +179,7 @@
 | 11 | YouTube ASR 優化 | 時間差感覺 | 優化 Progressive Reveal 參數 |
 | 12 | 中文翻譯指定 | 無法區分繁簡體 | 使用完整語言名稱 |
 | 13 | 字元數量限制 | 句子過長 | 新增 maxCharsPerCue 選項 |
+| 14 | 字幕呈現優化 | 字幕一次跳出太突然 | 縮短 ASR 合併長度 + requestAnimationFrame 漸進顯示 |
 
 ---
 
@@ -260,6 +261,43 @@ cues = cues.map((cue, idx) => ({ ...cue, index: idx }));
 | 0-5% | 0-40% |
 | 5-80% | 40-95% |
 | 80-100% | 100% |
+
+---
+
+### 修復 14: 字幕呈現優化 - 減少「突然跳出」感
+
+**問題描述：** YouTube 自動字幕會逐字顯示，但翻譯後的字幕會整句一次出現，造成視覺上的突兀感。
+
+**解決方案：** 雙管齊下的優化策略
+
+#### 1. 縮短 ASR 合併參數
+
+**檔案:** `src/shared/utils/asr-consolidator.ts`
+
+| 參數 | 舊值 | 新值 | 說明 |
+|------|------|------|------|
+| `maxGapMs` | 1200ms | 800ms | 更頻繁的斷句 |
+| `maxDurationMs` | 5000ms | 3000ms | 更短的 cue 時長 |
+| `maxCharsPerCue` | 80 字元 | 40 字元 | 每段更少文字 |
+
+#### 2. requestAnimationFrame 漸進式文字顯示
+
+**檔案:** `src/content/realtime-translator.ts`
+
+使用 `requestAnimationFrame` 實現逐字顯示動畫：
+
+```typescript
+// 動畫參數
+- 動畫時長: cue 時長的 50%，介於 0.4s ~ 1.5s
+- 初始顯示: 20% 的文字（避免空白到滿的突兀感）
+- 緩動曲線: ease-out quadratic（快進慢出）
+```
+
+**效果:**
+- 字幕以 20% 文字開始顯示
+- 透過 ease-out 曲線逐漸顯示剩餘文字
+- 較短的 cue 讓每次顯示的文字量更少
+- 整體感覺更加平順自然
 
 ---
 
