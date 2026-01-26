@@ -158,13 +158,12 @@ export function createSubtitleRenderer(): SubtitleRenderer {
    * Find the active cue at the given time
    *
    * Uses intelligent gap handling to prevent subtitle flickering:
-   * - Very short gaps (≤500ms): Extend previous cue for up to 400ms (seamless transition)
-   * - Short gaps (500-1000ms): Extend previous cue for up to 350ms
-   * - Medium gaps (1000-1500ms): Extend previous cue for up to 250ms
-   * - Long gaps (>1500ms): No extension (intentional pause in speech)
+   * - Short gaps (≤500ms): Seamless transition
+   * - Medium gaps (500-1000ms): Extend up to 400ms
+   * - Longer gaps (1000-2000ms): Extend up to 300ms
+   * - Very long gaps (>2000ms): No extension (intentional pause)
    *
-   * These values are optimized for YouTube ASR subtitles where word-by-word
-   * display creates many small gaps that shouldn't cause flickering.
+   * These grace periods prevent flickering while maintaining natural rhythm.
    */
   function findActiveCue(time: number): Cue | null {
     // Binary search for efficiency with many cues
@@ -200,16 +199,20 @@ export function createSubtitleRenderer(): SubtitleRenderer {
         const timeIntoGap = time - gapStart;
 
         // Determine grace period based on gap duration
-        // Optimized for YouTube ASR which has many small gaps between words
+        // Grace periods prevent flickering while maintaining natural rhythm
         let gracePeriod: number;
         if (gapDuration <= 500) {
-          gracePeriod = 400;  // Very short gap: nearly seamless transition
+          // Short gap: seamless transition
+          gracePeriod = Math.min(450, gapDuration);
         } else if (gapDuration <= 1000) {
-          gracePeriod = 350;  // Short gap: extend 350ms
-        } else if (gapDuration <= 1500) {
-          gracePeriod = 250;  // Medium gap: extend 250ms
+          // Medium gap: extend up to 400ms
+          gracePeriod = 400;
+        } else if (gapDuration <= 2000) {
+          // Longer gap: extend up to 300ms
+          gracePeriod = 300;
         } else {
-          gracePeriod = 0;    // Long gap: no extension (intentional pause)
+          // Very long gap: intentional pause, don't extend
+          gracePeriod = 0;
         }
 
         // If within grace period, return the previous cue
