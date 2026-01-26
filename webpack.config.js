@@ -79,6 +79,8 @@ module.exports = (env, argv) => {
           options: {
             // Use production tsconfig for prod builds (no declarations)
             configFile: isProduction ? 'tsconfig.build.json' : 'tsconfig.json',
+            // Skip type checking for faster builds - use npm run typecheck for type validation
+            transpileOnly: true,
           },
         },
         exclude: /node_modules/
